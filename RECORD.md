@@ -17,10 +17,12 @@
 | Oct 22 2026 | Embedded typography with fontdue + Inter fonts | ✅ | `pending` |
 | Oct 22 2026 | Reactive Avatar with 5 emotion states & blink animations | ✅ | `pending` |
 | Oct 22 2026 | UEFI bootloader verified with `x86_64-unknown-uefi` target | ✅ | `pending` |
+| Oct 22 2026 | Kernel GDT/IDT/interrupts & bare-metal build (`x86_64-unknown-none`) | ✅ | `pending` |
+| Oct 22 2026 | Release binaries built (`zuupos-boot.efi` + `zuupos-kernel` ELF) | ✅ | `pending` |
 | Oct 22 2026 | Host demo launcher (`tools/run-demo.sh`) verified working end-to-end | ✅ | `pending` |
 | Oct 22 2026 | GitHub Actions CI/CD (.github/workflows/ci.yml) | ✅ | `pending` |
 | Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
-| Oct 27 2026 | UEFI bootloader boots in QEMU | 🔴 | - |
+| Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | in progress |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | 🔴 | - |
 | Oct 31 2026 | Physical memory manager (buddy allocator) | 🔴 | - |
 | Nov 2 2026 | Virtual memory + higher-half kernel | 🔴 | - |
