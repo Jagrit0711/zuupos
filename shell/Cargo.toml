@@ -8,27 +8,21 @@ name = "zuupos-shell"
 path = "src/main.rs"
 
 [dependencies]
-# Software framebuffer (no GPU needed — pure CPU pixel rendering)
+# Windowing — use 0.29 which uses ApplicationHandler trait
+winit = { version = "0.29", features = ["rwh_05"] }
+# Software framebuffer — pixel-perfect CPU rendering
 softbuffer = "0.4"
-winit = "0.29"
-
-# GPU-accelerated 2D (future)
-# wgpu = "22"
-
-# Animation / easing
-# keyframe = "1"
-
-# Font rendering
+# Font rendering — no_std compatible, pure Rust
 fontdue = "0.9"
-cosmic-text = "0.12"
-
-# Image loading for avatar sprites
-image = { version = "0.25", default-features = false, features = ["png", "webp"] }
-
-# IPC with agentd
+# Async for IPC with agentd
 tokio = { version = "1", features = ["full"] }
+# IPC protocol
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
+# Time
+chrono = { version = "0.4", features = ["clock"] }
+# Logging
 log = "0.4"
 env_logger = "0.11"
+# Rand (for particle effects)
+rand = "0.8"

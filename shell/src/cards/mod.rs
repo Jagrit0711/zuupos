@@ -2,15 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CardType {
+    #[default]
     Info,
     Task,
     Alert,
     Weather,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
     pub id: u64,
     pub title: String,
@@ -18,6 +19,19 @@ pub struct Card {
     pub card_type: CardType,
     pub age_ticks: u32,
     pub max_age: u32,
+}
+
+impl Default for Card {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            title: String::new(),
+            body: String::new(),
+            card_type: CardType::Info,
+            age_ticks: 0,
+            max_age: 300,
+        }
+    }
 }
 
 pub struct CardManager {

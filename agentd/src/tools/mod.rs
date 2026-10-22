@@ -4,7 +4,7 @@
 //! and invoked by name from the agent loop. This is the capability boundary:
 //! the agent can ONLY affect the world through tools.
 
-use crate::agent::SystemEvent;
+use crate::ipc::{Card, CardType, Emotion, IpcClient, ShellEvent};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,23 +26,21 @@ pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool + Send + Sync>>,
 }
 
-impl Default for ToolRegistry {
-    fn default() -> Self {
+impl ToolRegistry {
+    pub fn new(ipc: IpcClient) -> Self {
         let mut reg = Self {
             tools: HashMap::new(),
         };
-        reg.register(Box::new(DisplayCardTool));
-        reg.register(Box::new(SpeakTool));
+        reg.register(Box::new(DisplayCardTool { ipc: ipc.clone() }));
+        reg.register(Box::new(SpeakTool { ipc: ipc.clone() }));
         reg.register(Box::new(OpenAppTool));
-        reg.register(Box::new(SetReminderTool));
+        reg.register(Box::new(SetReminderTool { ipc: ipc.clone() }));
         reg.register(Box::new(RunCommandTool));
         reg.register(Box::new(DimDisplayTool));
-        reg.register(Box::new(FocusMusicTool));
+        reg.register(Box::new(FocusMusicTool { ipc }));
         reg
     }
-}
 
-impl ToolRegistry {
     fn register(&mut self, tool: Box<dyn Tool + Send + Sync>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
@@ -77,29 +75,56 @@ trait Tool {
 
 // ─── Tool Implementations ────────────────────────────────────────────────────
 
-struct DisplayCardTool;
+struct DisplayCardTool {
+    ipc: IpcClient,
+}
+
 #[async_trait::async_trait]
 impl Tool for DisplayCardTool {
-    fn name(&self) -> &str { "display_card" }
+    fn name(&self) -> &str {
+        "display_card"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
-        let title = args["title"].as_str().unwrap_or("Untitled");
-        let body = args["body"].as_str().unwrap_or("");
-        let card_type = args["type"].as_str().unwrap_or("info");
-        info!("[tool::display_card] [{card_type}] {title}: {body}");
-        // TODO Phase 1.7: write to shell via IPC channel
+        let title = args["title"].as_str().unwrap_or("Zuupos Notification").to_string();
+        let body = args["body"].as_str().unwrap_or("").to_string();
+        let card_type_str = args["type"].as_str().unwrap_or("info");
+        let card_type = match card_type_str {
+            "task" => CardType::Task,
+            "alert" => CardType::Alert,
+            "weather" => CardType::Weather,
+            _ => CardType::Info,
+        };
+
+        info!("[tool::display_card] [{card_type_str}] {title}: {body}");
+
+        self.ipc.send(ShellEvent::Card(Card {
+            id: 0,
+            title: title.clone(),
+            body: body.clone(),
+            card_type,
+            age_ticks: 0,
+            max_age: 450,
+        }));
+
         format!("Card displayed: {title}")
     }
 }
 
-struct SpeakTool;
+struct SpeakTool {
+    ipc: IpcClient,
+}
+
 #[async_trait::async_trait]
 impl Tool for SpeakTool {
-    fn name(&self) -> &str { "speak" }
+    fn name(&self) -> &str {
+        "speak"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
         let text = args["text"].as_str().unwrap_or("");
         let priority = args["priority"].as_str().unwrap_or("normal");
         info!("[tool::speak] [{priority}] \"{text}\"");
-        // TODO Phase 1.8: call espeak-ng / kokoro TTS
+        self.ipc.send(ShellEvent::AvatarEmotion(Emotion::Speaking));
+        self.ipc.send(ShellEvent::StatusUpdate(format!("Speaking: {}", text)));
         format!("Spoken: {text}")
     }
 }
@@ -107,24 +132,39 @@ impl Tool for SpeakTool {
 struct OpenAppTool;
 #[async_trait::async_trait]
 impl Tool for OpenAppTool {
-    fn name(&self) -> &str { "open_app" }
+    fn name(&self) -> &str {
+        "open_app"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
         let name = args["name"].as_str().unwrap_or("unknown");
         info!("[tool::open_app] Opening: {name}");
-        // TODO: spawn process via kernel IPC
         format!("Opened app: {name}")
     }
 }
 
-struct SetReminderTool;
+struct SetReminderTool {
+    ipc: IpcClient,
+}
+
 #[async_trait::async_trait]
 impl Tool for SetReminderTool {
-    fn name(&self) -> &str { "set_reminder" }
+    fn name(&self) -> &str {
+        "set_reminder"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
-        let title = args["title"].as_str().unwrap_or("Reminder");
+        let title = args["title"].as_str().unwrap_or("Reminder").to_string();
         let mins = args["in_minutes"].as_u64().unwrap_or(30);
         info!("[tool::set_reminder] '{title}' in {mins}m");
-        // TODO: store in context engine + schedule timer interrupt
+
+        self.ipc.send(ShellEvent::Card(Card {
+            id: 0,
+            title: format!("Reminder (in {}m)", mins),
+            body: title.clone(),
+            card_type: CardType::Task,
+            age_ticks: 0,
+            max_age: 400,
+        }));
+
         format!("Reminder set: '{title}' in {mins} minutes")
     }
 }
@@ -132,12 +172,13 @@ impl Tool for SetReminderTool {
 struct RunCommandTool;
 #[async_trait::async_trait]
 impl Tool for RunCommandTool {
-    fn name(&self) -> &str { "run_command" }
+    fn name(&self) -> &str {
+        "run_command"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
         let cmd = args["cmd"].as_str().unwrap_or("");
         let reason = args["reason"].as_str().unwrap_or("");
         info!("[tool::run_command] '{cmd}' (reason: {reason})");
-        // TODO: execute via kernel process syscall
         format!("Command queued: {cmd}")
     }
 }
@@ -145,7 +186,9 @@ impl Tool for RunCommandTool {
 struct DimDisplayTool;
 #[async_trait::async_trait]
 impl Tool for DimDisplayTool {
-    fn name(&self) -> &str { "dim_display" }
+    fn name(&self) -> &str {
+        "dim_display"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
         let level = args["level"].as_f64().unwrap_or(0.5);
         info!("[tool::dim_display] level={level}");
@@ -153,13 +196,28 @@ impl Tool for DimDisplayTool {
     }
 }
 
-struct FocusMusicTool;
+struct FocusMusicTool {
+    ipc: IpcClient,
+}
+
 #[async_trait::async_trait]
 impl Tool for FocusMusicTool {
-    fn name(&self) -> &str { "play_focus_music" }
+    fn name(&self) -> &str {
+        "play_focus_music"
+    }
     async fn execute(&self, args: &serde_json::Value) -> String {
         let genre = args["genre"].as_str().unwrap_or("lofi");
         info!("[tool::play_focus_music] genre={genre}");
+
+        self.ipc.send(ShellEvent::Card(Card {
+            id: 0,
+            title: "Focus Audio".to_string(),
+            body: format!("Streaming {} audio stream", genre),
+            card_type: CardType::Weather,
+            age_ticks: 0,
+            max_age: 350,
+        }));
+
         format!("Playing {genre} focus music")
     }
 }

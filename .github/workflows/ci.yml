@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check-host-crates:
+    name: Check host-runnable crates
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo fmt check
+        run: cargo fmt --check -p zuupos-agentd -p zuupos-shell -p zuupos-sdk
+      - name: cargo clippy agentd
+        run: cargo clippy -p zuupos-agentd -- -D warnings
+      - name: cargo clippy shell
+        run: cargo clippy -p zuupos-shell -- -D warnings
+      - name: cargo test agentd
+        run: cargo test -p zuupos-agentd
+      - name: cargo test shell
+        run: cargo test -p zuupos-shell
+
+  check-bare-metal:
+    name: Check bare-metal crates (no_std)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust nightly + targets
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-unknown-none,x86_64-unknown-uefi
+          components: rust-src,llvm-tools-preview
+      - name: Check kernel
+        run: cargo check -p zuupos-kernel --target x86_64-unknown-none
+      - name: Check bootloader
+        run: cargo check -p zuupos-boot --target x86_64-unknown-uefi
+
+  release:
+    name: Build release binaries
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check-host-crates]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build agentd release
+        run: cargo build --release -p zuupos-agentd
+      - name: Build shell release
+        run: cargo build --release -p zuupos-shell
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/zuupos-agentd
+            target/release/zuupos-shell

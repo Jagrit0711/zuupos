@@ -5,6 +5,7 @@
 
 mod agent;
 mod context;
+mod ipc;
 mod llm;
 mod tools;
 mod voice;

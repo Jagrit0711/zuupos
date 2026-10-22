@@ -10,10 +10,13 @@
 
 extern crate alloc;
 
+#[global_allocator]
+static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
+
 use log::info;
+use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams};
 use uefi::prelude::*;
-use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
-use uefi::table::boot::{MemoryType, OpenProtocolAttributes, OpenProtocolParams};
+use uefi::proto::console::gop::GraphicsOutput;
 
 /// Boot information passed to the kernel.
 /// Must be kept in sync with `kernel/src/arch/x86_64/boot_info.rs`.
@@ -37,11 +40,8 @@ pub struct BootInfo {
 }
 
 #[entry]
-fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
-    // Initialize UEFI services (allocator, logger, etc.)
-    uefi_services::init(&mut st).unwrap();
-
-    let bt = st.boot_services();
+fn main() -> Status {
+    let _ = uefi::helpers::init();
 
     info!("╔══════════════════════════════════════╗");
     info!("║          Z U U P O S   O S           ║");
@@ -50,54 +50,39 @@ fn efi_main(image: Handle, mut st: SystemTable<Boot>) -> Status {
     info!("Bootloader Phase 1.1 initializing...");
 
     // --- Acquire framebuffer via GOP ---
-    let fb_info = acquire_framebuffer(bt, image);
-    info!(
-        "Framebuffer: {}x{} @ {:#x}, stride={}",
-        fb_info.0, fb_info.1, fb_info.2, fb_info.3
-    );
+    if let Some((width, height, fb_addr, stride)) = acquire_framebuffer() {
+        info!("Framebuffer: {}x{} @ {:#x}, stride={}", width, height, fb_addr, stride);
+        draw_boot_splash(fb_addr, width, height, stride);
+    }
 
-    // --- Draw boot splash ---
-    draw_boot_splash(fb_info.2, fb_info.0, fb_info.1, fb_info.3);
-
-    // TODO Phase 1.1: Load kernel ELF from ESP partition
-    // TODO Phase 1.1: Parse ELF, map segments into virtual memory
-    // TODO Phase 1.1: Build final page tables (4-level paging)
-    // TODO Phase 1.1: Exit boot services, jump to kernel _start
-
-    info!("ZuuposOS bootloader initialized. Kernel load: TODO.");
-    info!("Halting in QEMU for now — Phase 1.1 stub.");
+    info!("ZuuposOS bootloader initialized. Halting in QEMU (Phase 1.1 stub).");
 
     loop {
-        // Spin; real impl will jump to kernel
         unsafe { core::arch::asm!("hlt") }
     }
 }
 
-/// Returns (width, height, base_addr, stride, pixel_format)
-fn acquire_framebuffer(bt: &BootServices, image: Handle) -> (u32, u32, u64, u32, PixelFormat) {
-    let handle = bt
-        .get_handle_for_protocol::<GraphicsOutput>()
-        .expect("No GOP handle");
-
+/// Returns (width, height, base_addr, stride)
+fn acquire_framebuffer() -> Option<(u32, u32, u64, u32)> {
+    let handle = boot::get_handle_for_protocol::<GraphicsOutput>().ok()?;
     let mut gop = unsafe {
-        bt.open_protocol::<GraphicsOutput>(
+        boot::open_protocol::<GraphicsOutput>(
             OpenProtocolParams {
                 handle,
-                agent: image,
+                agent: boot::image_handle(),
                 controller: None,
             },
             OpenProtocolAttributes::GetProtocol,
         )
-        .expect("Failed to open GOP")
+        .ok()?
     };
 
     let mode = gop.current_mode_info();
     let (width, height) = mode.resolution();
     let stride = mode.stride() as u32;
-    let pf = mode.pixel_format();
     let fb_addr = gop.frame_buffer().as_mut_ptr() as u64;
 
-    (width as u32, height as u32, fb_addr, stride, pf)
+    Some((width as u32, height as u32, fb_addr, stride))
 }
 
 /// Draw a minimal boot splash to show the framebuffer works.

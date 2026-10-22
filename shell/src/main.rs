@@ -1,15 +1,17 @@
-//! ZuuposOS Agentic Shell
+//! ZuuposOS Agentic Shell — main entry point
 //!
-//! Phase 1.7: Framebuffer compositor + Taby-style avatar.
-//! This process receives "card" commands from agentd over IPC
-//! and renders them to the display. No traditional windows — only
-//! AI-decided floating cards and the ambient avatar.
+//! Runs the winit event loop and the IPC listener for agentd commands.
+//! On bare metal this becomes a framebuffer-direct process; on macOS host
+//! it runs as a native window for rapid development.
 
 mod avatar;
 mod cards;
 mod compositor;
+mod ipc;
 mod renderer;
+mod theme;
 
+use compositor::run_shell;
 use log::info;
 
 fn main() {
@@ -22,6 +24,5 @@ fn main() {
     info!("║    AI-driven agentic UI compositor     ║");
     info!("╚════════════════════════════════════════╝");
 
-    let mut compositor = compositor::Compositor::new();
-    compositor.run();
+    run_shell();
 }

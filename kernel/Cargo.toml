@@ -25,17 +25,14 @@ uart_16550 = "0.3"
 # For volatile reads/writes
 volatile = "0.5"
 # ACPI parsing
-acpi = "5"
-aml = "0.17"
+acpi = "6.1"
 # For lazy initialization
-conquer-once = { version = "0.4", default-features = false, features = ["spin_no_std"] }
+conquer-once = { version = "0.4", default-features = false }
 # Interrupt handling
 pic8259 = "0.10"
+lazy_static = { version = "1", features = ["spin_no_std"] }
 
 [features]
 default = []
 # Enable QEMU test runner exit
 qemu-exit = []
-
-lazy_static = { version = "1", features = ["spin_no_std"] }
-pic8259 = "0.10"
