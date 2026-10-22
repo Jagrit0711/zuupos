@@ -1,0 +1,41 @@
+[package]
+name = "zuupos-kernel"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "zuupos_kernel"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zuupos-kernel"
+path = "src/main.rs"
+
+[dependencies]
+# For logging (no_std compatible)
+log = { version = "0.4", default-features = false }
+# Bare-metal abstractions
+x86_64 = "0.15"
+# Spinning mutex (no OS needed)
+spinning_top = "0.3"
+# Bitmap allocator for page frames
+linked_list_allocator = "0.10"
+# UART serial
+uart_16550 = "0.3"
+# For volatile reads/writes
+volatile = "0.5"
+# ACPI parsing
+acpi = "5"
+aml = "0.17"
+# For lazy initialization
+conquer-once = { version = "0.4", default-features = false, features = ["spin_no_std"] }
+# Interrupt handling
+pic8259 = "0.10"
+
+[features]
+default = []
+# Enable QEMU test runner exit
+qemu-exit = []
+
+lazy_static = { version = "1", features = ["spin_no_std"] }
+pic8259 = "0.10"

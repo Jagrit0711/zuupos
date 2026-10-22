@@ -1,0 +1,45 @@
+[config]
+default_to_workspace = false
+
+[tasks.run]
+description = "Build and run ZuuposOS in QEMU"
+script = ["./tools/run.sh"]
+
+[tasks.run-shell]
+description = "Run just the agentic shell on host OS (for development)"
+cwd = "shell"
+command = "cargo"
+args = ["run", "--bin", "zuupos-shell"]
+
+[tasks.run-agent]
+description = "Run just the agentd on host OS (for LLM development)"
+cwd = "agentd"
+command = "cargo"
+args = ["run", "--bin", "zuupos-agentd"]
+
+[tasks.build-boot]
+description = "Build UEFI bootloader"
+cwd = "bootloader"
+command = "cargo"
+args = ["build", "--release", "--target", "x86_64-unknown-uefi"]
+
+[tasks.build-kernel]
+description = "Build kernel"
+cwd = "kernel"
+command = "cargo"
+args = ["build", "--release", "--target", "x86_64-unknown-none"]
+
+[tasks.check]
+description = "Check all crates compile"
+command = "cargo"
+args = ["check", "--workspace"]
+
+[tasks.fmt]
+description = "Format all code"
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.test]
+description = "Run all tests"
+command = "cargo"
+args = ["test", "--workspace"]

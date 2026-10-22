@@ -1,0 +1,8 @@
+[package]
+name = "zuupos-sdk"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "zuupos_sdk"
+path = "src/lib.rs"
