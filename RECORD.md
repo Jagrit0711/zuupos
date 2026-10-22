@@ -10,15 +10,16 @@
 |------|-----------|--------|--------|
 | Oct 22 2026 | Project scaffolded (46 files, 2089 lines) | ✅ | `e87e996` |
 | Oct 22 2026 | Architecture blueprint + README written | ✅ | `e87e996` |
-| Oct 22 2026 | RECORD.md created | ✅ | pending |
-| Oct 22 2026 | Shell API fixed (winit 0.29 + softbuffer 0.4) | 🔄 | pending |
-| Oct 22 2026 | Agentd Ollama LLM backend wired | 🔄 | pending |
-| Oct 22 2026 | Shell ↔ Agentd IPC (Unix socket) | 🔄 | pending |
-| Oct 22 2026 | fontdue text rendering in cards | 🔄 | pending |
-| Oct 22 2026 | Avatar emotion states (Idle/Thinking/Speaking) | 🔄 | pending |
-| Oct 22 2026 | GitHub repo created + pushed | 🔄 | pending |
-| Oct 22 2026 | CI/CD (.github/workflows/ci.yml) | 🔄 | pending |
-| Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS | 🔴 | - |
+| Oct 22 2026 | RECORD.md created | ✅ | `e87e996` |
+| Oct 22 2026 | Shell API implemented (winit 0.29 + softbuffer 0.4) | ✅ | `pending` |
+| Oct 22 2026 | Shell ↔ Agentd IPC via Unix domain socket (`/tmp/zuupos_shell.sock`) | ✅ | `pending` |
+| Oct 22 2026 | Live Ollama LLM integration (`llama3.2:latest`) with autonomous fallback | ✅ | `pending` |
+| Oct 22 2026 | Embedded typography with fontdue + Inter fonts | ✅ | `pending` |
+| Oct 22 2026 | Reactive Avatar with 5 emotion states & blink animations | ✅ | `pending` |
+| Oct 22 2026 | UEFI bootloader verified with `x86_64-unknown-uefi` target | ✅ | `pending` |
+| Oct 22 2026 | Host demo launcher (`tools/run-demo.sh`) verified working end-to-end | ✅ | `pending` |
+| Oct 22 2026 | GitHub Actions CI/CD (.github/workflows/ci.yml) | ✅ | `pending` |
+| Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
 | Oct 27 2026 | UEFI bootloader boots in QEMU | 🔴 | - |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | 🔴 | - |
 | Oct 31 2026 | Physical memory manager (buddy allocator) | 🔴 | - |

@@ -149,46 +149,38 @@ The OS maintains a long-horizon memory:
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **1.1** | Bootloader: UEFI app that enters long mode | 🔴 TODO |
-| **1.2** | Kernel: GDT/IDT setup, physical memory manager | 🔴 TODO |
-| **1.3** | Kernel: Basic scheduler + process isolation | 🔴 TODO |
-| **1.4** | Kernel: UART + framebuffer output | 🔴 TODO |
-| **1.5** | Agentd: LLM running in userspace on candle-rs | 🔴 TODO |
-| **1.6** | Agentd: Basic tool loop (read/write FS, exec) | 🔴 TODO |
-| **1.7** | Shell: Framebuffer compositor + avatar renderer | 🔴 TODO |
-| **1.8** | Shell: Voice I/O via whisper.cpp + espeak | 🔴 TODO |
-| **1.9** | Integration: AI-driven boot experience | 🔴 TODO |
+| **1.1** | Bootloader: UEFI app compiled for `x86_64-unknown-uefi` | ✅ Ready |
+| **1.2** | Kernel: GDT/IDT/interrupts structure & abstractions | 🔄 In Progress |
+| **1.3** | Kernel: Memory management (VMM/PMM) | 🔴 TODO |
+| **1.4** | Kernel: Drivers & GOP framebuffer output | 🔴 TODO |
+| **1.5** | Agentd: ReAct loop + live Ollama (`llama3.2:latest`) & candle runtime | ✅ Working |
+| **1.6** | Agentd: Tool registry (cards, commands, reminders, audio) | ✅ Working |
+| **1.7** | Shell: Softbuffer compositor + avatar emotion + fontdue Inter | ✅ Working |
+| **1.8** | IPC: Unix domain socket bridge (`/tmp/zuupos_shell.sock`) | ✅ Working |
+| **1.9** | Host Demo: Full end-to-end macOS agentic OS preview | ✅ Working |
 
 ---
 
-## Tech Stack
+## Running the Live Demo
 
-| Layer | Technology |
-|-------|-----------|
-| **Language** | Rust (primary), x86-64 Assembly (minimal, for boot/interrupts) |
-| **Boot** | UEFI via `uefi` crate |
-| **Kernel** | `no_std` Rust, custom allocator, custom scheduler |
-| **AI Runtime** | `candle` (HuggingFace, pure Rust) + `llama.cpp` FFI |
-| **GPU/Display** | Framebuffer (UEFI GOP) → wgpu when drivers mature |
-| **Voice STT** | whisper.cpp via FFI |
-| **Voice TTS** | espeak-ng or kokoro-rs |
-| **Build** | `cargo`, `cargo-make`, QEMU for emulation |
-| **Target** | x86-64-unknown-none (bare metal) |
-
----
-
-## Build & Run
+You can run the full host-native demo directly on your macOS machine right now:
 
 ```bash
-# Prerequisites
-cargo install cargo-make
-# Install QEMU: brew install qemu
+# Ensure local Ollama is running (optional — autonomous fallback active if offline)
+ollama run llama3.2:latest
 
-# Run in QEMU (full emulation)
-cargo make run
+# Run the complete ZuuposOS host preview (shell compositor + agent daemon)
+./tools/run-demo.sh
+```
 
-# Build disk image only
-cargo make build-iso
+Or run the components independently:
+
+```bash
+# Terminal 1: Run the compositor shell
+cargo run -p zuupos-shell
+
+# Terminal 2: Run the agent runtime daemon (PID 1)
+cargo run -p zuupos-agentd
 ```
 
 ---
