@@ -204,3 +204,4 @@ cargo make build-iso
 ---
 
 *ZuuposOS — The OS that thinks for itself.*
+# zuupos
