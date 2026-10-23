@@ -46,12 +46,10 @@ impl Avatar {
         self.tick = global_tick;
 
         // Blink logic (suppress blinking while thinking)
-        if self.emotion != Emotion::Thinking {
-            if global_tick >= self.next_blink {
-                self.blink_tick = global_tick;
-                // Next blink: 80–280 frames (~1.3–4.6s @ 60fps)
-                self.next_blink = global_tick + 80 + (global_tick % 200);
-            }
+        if self.emotion != Emotion::Thinking && global_tick >= self.next_blink {
+            self.blink_tick = global_tick;
+            // Next blink: 80–280 frames (~1.3–4.6s @ 60fps)
+            self.next_blink = global_tick + 80 + (global_tick % 200);
         }
     }
 

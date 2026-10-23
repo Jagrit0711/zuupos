@@ -618,8 +618,7 @@ impl Renderer {
                 for i in 0..3u32 {
                     let phase = (tick as f32 * 0.18 + i as f32 * 1.1).sin();
                     let dot_y = (y + size / 2 + 14) as i32 - (phase * 4.0) as i32;
-                    let dot_color =
-                        lerp_color(AVATAR_FACE, ACCENT_AMBER, (phase * 0.5 + 0.5) as f32);
+                    let dot_color = lerp_color(AVATAR_FACE, ACCENT_AMBER, phase * 0.5 + 0.5);
                     let dx = x + size / 2 - 8 + i * 9;
                     self.fill_circle(dx, dot_y as u32, 3, dot_color);
                 }
@@ -711,10 +710,10 @@ impl Renderer {
             0.0
         };
         let n = self.waveform.len();
-        for i in 0..n {
+        for (i, wave) in self.waveform.iter_mut().enumerate().take(n) {
             let phase = tick as f32 * 0.3 + i as f32 * 0.7;
             let target = (phase.sin() * 0.7 + (phase * 1.3).cos() * 0.3) * target_amp;
-            self.waveform[i] = self.waveform[i] * 0.85 + target * 0.15;
+            *wave = *wave * 0.85 + target * 0.15;
         }
     }
 

@@ -271,7 +271,7 @@ Output JSON tool calls for each action (one per line, no other text needed):"#,
         }
         // Slower cycles at night
         let hour = Local::now().hour();
-        if hour < 6 || hour >= 22 {
+        if !(6..22).contains(&hour) {
             return 15000 + jitter;
         }
         base + jitter

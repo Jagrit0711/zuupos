@@ -108,6 +108,12 @@ pub struct CapabilitySet {
     capabilities: HashSet<CapabilityType>,
 }
 
+impl Default for CapabilitySet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CapabilitySet {
     pub fn new() -> Self {
         Self {

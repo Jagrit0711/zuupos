@@ -7,6 +7,7 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+#[allow(private_interfaces)]
 pub enum LlmBackend {
     Ollama(OllamaEngine),
     LlamaCpp(LlamaCppEngine),
@@ -16,6 +17,7 @@ pub enum LlmBackend {
 pub struct LlmEngine {
     backend: LlmBackend,
     temperature: f64,
+    #[allow(dead_code)]
     max_tokens: usize,
 }
 
@@ -80,6 +82,7 @@ impl LlmEngine {
     }
 }
 
+#[allow(private_interfaces)]
 struct OllamaEngine {
     client: reqwest::Client,
     ollama_url: String,
@@ -124,6 +127,7 @@ impl OllamaEngine {
     }
 }
 
+#[allow(private_interfaces)]
 struct LlamaCppEngine {
     _model_path: String,
     // In real implementation: Arc<Mutex<llama_cpp_2::model::LlamaModel>>
@@ -154,6 +158,7 @@ impl LlamaCppEngine {
     }
 }
 
+#[allow(private_interfaces)]
 struct FallbackEngine {
     count: u64,
 }

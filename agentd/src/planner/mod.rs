@@ -70,7 +70,7 @@ impl Planner {
 
         // Queue all steps
         self.step_queue.clear();
-        for (step, call) in self.active_plan.iter().cloned().zip(raw_calls.into_iter()) {
+        for (step, call) in self.active_plan.iter().cloned().zip(raw_calls) {
             self.step_queue.push_back(QueuedStep {
                 plan_step: step,
                 tool_call: call,

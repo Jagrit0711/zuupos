@@ -55,7 +55,7 @@ pub enum ActionType {
     SendIpc,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CardStyle {
     pub background: Option<String>, // Hex color
     pub text_color: Option<String>,
@@ -137,19 +137,6 @@ impl Card {
     pub fn with_metadata(mut self, key: &str, value: serde_json::Value) -> Self {
         self.metadata.insert(key.to_string(), value);
         self
-    }
-}
-
-impl Default for CardStyle {
-    fn default() -> Self {
-        Self {
-            background: None,
-            text_color: None,
-            border_color: None,
-            icon: None,
-            width: None,
-            height: None,
-        }
     }
 }
 
