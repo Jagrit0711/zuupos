@@ -14,13 +14,18 @@ extern crate alloc;
 static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
 
 use alloc::vec::Vec;
+use core::mem;
 use log::info;
-use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams};
 use uefi::prelude::*;
-use uefi::proto::console::gop::GraphicsOutput;
-use uefi::proto::media::file::{File, FileAttribute, FileMode, FileType};
+use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+use uefi::proto::media::file::{File, FileAttribute, FileMode, FileInfo, FileType};
 use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::table::boot::MemoryDescriptor;
+use uefi::mem::memory_map::{MemoryMap, MemoryType};
+use uefi::system::with_config_table;
+use uefi::table::cfg::{ACPI2_GUID, ACPI_GUID};
+use uefi::data_types::PhysicalAddress;
+use uefi::boot::{AllocateType, MemoryDescriptor};
+use uefi::cstr16;
 
 /// Boot information passed to the kernel.
 /// Must be kept in sync with `kernel/src/arch/x86_64/boot_info.rs`.
@@ -97,7 +102,7 @@ fn main() -> Status {
 
     // --- Exit boot services ---
     info!("Exiting boot services...");
-    let mut bt = uefi::boot::exit_boot_services();
+    let _memory_map = unsafe { uefi::boot::exit_boot_services(MemoryType::LOADER_DATA) };
 
     // --- Jump to kernel ---
     let boot_info_ptr = &boot_info as *const BootInfo;
@@ -114,26 +119,16 @@ fn main() -> Status {
 
 /// Returns (width, height, base_addr, stride, pixel_format)
 fn acquire_framebuffer() -> Option<(u32, u32, u64, u32, u32)> {
-    let handle = boot::get_handle_for_protocol::<GraphicsOutput>().ok()?;
-    let mut gop = unsafe {
-        boot::open_protocol::<GraphicsOutput>(
-            OpenProtocolParams {
-                handle,
-                agent: boot::image_handle(),
-                controller: None,
-            },
-            OpenProtocolAttributes::GetProtocol,
-        )
-        .ok()?
-    };
+    let handle = uefi::boot::get_handle_for_protocol::<GraphicsOutput>().ok()?;
+    let mut gop = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(handle).ok()?;
 
     let mode = gop.current_mode_info();
     let (width, height) = mode.resolution();
     let stride = mode.stride() as u32;
     let fb_addr = gop.frame_buffer().as_mut_ptr() as u64;
     let pixel_format = match mode.pixel_format() {
-        uefi::proto::console::gop::PixelFormat::Rgb => 0,
-        uefi::proto::console::gop::PixelFormat::Bgr => 1,
+        PixelFormat::Rgb => 0,
+        PixelFormat::Bgr => 1,
         _ => 0,
     } as u32;
 
@@ -163,49 +158,43 @@ fn draw_boot_splash(fb_addr: u64, width: u32, height: u32, stride: u32) {
 }
 
 fn get_memory_map() -> Option<(u64, usize, usize)> {
-    let mmap_size = boot::memory_map_size();
-    let mut buffer = Vec::with_capacity(mmap_size.map_size + 10 * mmap_size.entry_size);
-    let mmap = boot::memory_map(&mut buffer).ok()?;
-    let desc_size = mmap.entry_size();
+    let mmap = uefi::boot::memory_map(MemoryType::LOADER_DATA).ok()?;
+    let meta = mmap.meta();
+    let desc_size = meta.desc_size;
+    let len = mmap.len();
+    // Copy descriptors to a new buffer we own
+    let mut buffer = Vec::with_capacity(len);
+    for desc in mmap.entries() {
+        // MemoryDescriptor fields are: ty, phys_start, page_count
+        buffer.push(*desc);
+    }
     let addr = buffer.as_ptr() as u64;
-    let len = buffer.len();
-    core::mem::forget(buffer);
+    mem::forget(buffer);
     Some((addr, len, desc_size))
 }
 
 fn find_rsdp() -> Option<u64> {
-    let config_table = boot::system_table().config_table();
-    for entry in config_table.iter() {
-        if entry.guid == uefi::table::cfg::ACPI2_GUID || entry.guid == uefi::table::cfg::ACPI_GUID {
-            return Some(entry.address as u64);
+    with_config_table(|entries| {
+        for entry in entries {
+            if entry.guid == ACPI2_GUID || entry.guid == ACPI_GUID {
+                return Some(entry.address as u64);
+            }
         }
-    }
-    None
+        None
+    })
 }
 
 fn load_kernel() -> Option<(u64, u64, u64)> {
-    let handle = boot::get_handle_for_protocol::<SimpleFileSystem>().ok()?;
-    let mut fs = unsafe {
-        boot::open_protocol::<SimpleFileSystem>(
-            OpenProtocolParams {
-                handle,
-                agent: boot::image_handle(),
-                controller: None,
-            },
-            OpenProtocolAttributes::GetProtocol,
-        )
-        .ok()?
-    };
+    let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().ok()?;
+    let mut fs = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle).ok()?;
 
     let mut root_dir = fs.open_volume().ok()?;
-    let mut kernel_file = root_dir.open(
-        cstr::cstr!("\\EFI\\ZUUPOS\\KERNEL.ELF"),
-        FileMode::Read,
-        FileAttribute::empty(),
-    ).ok()?;
+    let path = cstr16!("\\EFI\\ZUUPOS\\KERNEL.ELF");
+    let mut kernel_file = root_dir.open(path, FileMode::Read, FileAttribute::empty()).ok()?;
 
-    if let FileType::Regular(file) = kernel_file.into_type().ok()? {
-        let file_size = file.get_info::<uefi::proto::media::file::FileInfo>().ok()?.file_size() as usize;
+    if let FileType::Regular(mut file) = kernel_file.into_type().ok()? {
+        let mut info_buffer = [0u8; 256];
+        let file_size = file.get_info::<FileInfo>(&mut info_buffer).ok()?.file_size() as usize;
         let mut buffer = Vec::with_capacity(file_size);
         file.read(&mut buffer).ok()?;
 
@@ -224,7 +213,7 @@ fn load_kernel() -> Option<(u64, u64, u64)> {
     }
 }
 
-fn find_kernel_load_address(buffer: &[u8]) -> Option<u64> {
+fn find_kernel_load_address(_buffer: &[u8]) -> Option<u64> {
     // Simple ELF parsing to find the load address
     // For now, use a fixed address: 2 MiB (after first 2 MiB reserved for bootloader)
     Some(0x200000)
@@ -296,8 +285,8 @@ fn setup_page_tables(
     unsafe { *pd.add(0) = pt_addr | 0x3 };
 
     // Map first 2 MiB identity (4 KiB pages)
-    for i in 0..512 {
-        let phys = i * PAGE_SIZE;
+    for i in 0..512usize {
+        let phys = i as u64 * PAGE_SIZE;
         unsafe { *pt.add(i) = phys | 0x3 };
     }
 
@@ -310,8 +299,8 @@ fn setup_page_tables(
     for i in 0..(kernel_pages as usize).min(512) {
         let phys = kernel_start + i as u64 * PAGE_SIZE;
         let virt = KERNEL_BASE + phys;
-        let pd_idx = (virt >> 21) & 0x1FF;
-        let pt_idx = (virt >> 12) & 0x1FF;
+        let pd_idx = ((virt >> 21) & 0x1FF) as usize;
+        let pt_idx = ((virt >> 12) & 0x1FF) as usize;
 
         if pt_idx == 0 {
             let pt_kernel = alloc_page()?;
@@ -325,11 +314,11 @@ fn setup_page_tables(
     // Map framebuffer in higher-half
     let fb_size = fb_stride as u64 * fb_height as u64 * 4;
     let fb_pages = (fb_size + PAGE_SIZE - 1) / PAGE_SIZE;
-    for i in 0..fb_pages {
-        let phys = fb_addr + i * PAGE_SIZE;
+    for i in 0..fb_pages as usize {
+        let phys = fb_addr + (i as u64) * PAGE_SIZE;
         let virt = KERNEL_BASE + phys;
-        let pd_idx = (virt >> 21) & 0x1FF;
-        let pt_idx = (virt >> 12) & 0x1FF;
+        let pd_idx = ((virt >> 21) & 0x1FF) as usize;
+        let pt_idx = ((virt >> 12) & 0x1FF) as usize;
 
         if pt_idx == 0 {
             let pt_fb = alloc_page()?;
@@ -345,19 +334,17 @@ fn setup_page_tables(
 }
 
 fn alloc_page() -> Option<u64> {
-    let mmap_size = boot::memory_map_size();
-    let mut buffer = Vec::with_capacity(mmap_size.map_size + 10 * mmap_size.entry_size);
-    let mmap = boot::memory_map(&mut buffer).ok()?;
+    let mmap = uefi::boot::memory_map(MemoryType::LOADER_DATA).ok()?;
 
-    for desc in mmap.iter() {
-        if desc.ty() == uefi::table::boot::MemoryType::CONVENTIONAL {
-            let pages = desc.page_count() as u64;
+    for desc in mmap.entries() {
+        if desc.ty == MemoryType::CONVENTIONAL {
+            let pages = desc.page_count;
             if pages > 0 {
-                let phys = desc.phys_start();
+                let phys = desc.phys_start;
                 // Mark as used by allocating
-                let status = boot::allocate_pages(
-                    uefi::boot::AllocateType::Address(phys),
-                    uefi::table::boot::MemoryType::LOADER_DATA,
+                let status = uefi::boot::allocate_pages(
+                    AllocateType::Address(phys as PhysicalAddress),
+                    MemoryType::LOADER_DATA,
                     1,
                 );
                 if status.is_ok() {

@@ -9,6 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 uefi = { version = "0.33", features = ["alloc", "logger", "panic_handler"] }
-uefi-services = "0.24"
+uefi-raw = "0.9"
 log = "0.4"
-cstr = "0.2"
