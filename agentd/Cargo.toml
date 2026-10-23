@@ -20,7 +20,6 @@ log = "0.4"
 env_logger = "0.11"
 
 async-trait = "0.1"
-lazy_static = "1"
 
 # Ollama HTTP client
 reqwest = { version = "0.12", features = ["json"] }
@@ -36,9 +35,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Random number generation for planner variance
 rand = "0.8"
-
-# llama.cpp FFI for local GGUF model inference
-llama-cpp-2 = "0.1"
 
 [features]
 default = ["ollama"]

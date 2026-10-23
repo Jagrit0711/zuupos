@@ -5,7 +5,6 @@
 use chrono::Timelike;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub enum LlmBackend {

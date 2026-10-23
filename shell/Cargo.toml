@@ -14,8 +14,6 @@ winit = { version = "0.30", features = ["rwh_05"] }
 softbuffer = "0.4"
 # Font rendering — no_std compatible, pure Rust
 fontdue = "0.9"
-# Async for IPC with agentd
-tokio = { version = "1", features = ["full"] }
 # IPC protocol
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

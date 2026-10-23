@@ -6,7 +6,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use crate::capabilities::CapabilityType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSchema {
@@ -84,14 +83,12 @@ where
 /// Tool registry for an app
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn ToolHandler>>,
-    required_capability: CapabilityType,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
-            required_capability: CapabilityType::RegisterTool,
         }
     }
 
