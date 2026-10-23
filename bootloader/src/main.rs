@@ -44,6 +44,9 @@ pub struct BootInfo {
     /// Kernel ELF physical load address
     pub kernel_phys_start: u64,
     pub kernel_phys_end: u64,
+    /// Initramfs physical address and size
+    pub initramfs_phys_start: u64,
+    pub initramfs_size: u64,
     /// RSDP (ACPI root) pointer
     pub rsdp_addr: u64,
     /// Page table (PML4) physical address
@@ -92,6 +95,18 @@ fn main() -> Status {
         kernel_phys_start, kernel_phys_end, kernel_entry
     );
 
+    // --- Load initramfs ---
+    let (initramfs_phys_start, initramfs_size) =
+        load_initramfs().unwrap_or((0, 0));
+    if initramfs_size > 0 {
+        info!(
+            "Initramfs loaded: {:#x} ({} bytes)",
+            initramfs_phys_start, initramfs_size
+        );
+    } else {
+        info!("No initramfs found");
+    }
+
     // --- Set up page tables (higher-half kernel) ---
     let (pml4_addr, physical_memory_offset) = setup_page_tables(
         kernel_phys_start,
@@ -119,6 +134,8 @@ fn main() -> Status {
         fb_pixel_format: pixel_format,
         kernel_phys_start,
         kernel_phys_end,
+        initramfs_phys_start,
+        initramfs_size,
         rsdp_addr,
         pml4_addr,
         physical_memory_offset,
@@ -266,6 +283,73 @@ fn parse_elf_entry(buffer: &[u8], load_addr: u64) -> Option<u64> {
         buffer[31],
     ]);
     Some(load_addr + entry)
+}
+
+fn load_initramfs() -> Option<(u64, u64)> {
+    let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().ok()?;
+    let mut fs = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle).ok()?;
+
+    let mut root_dir = fs.open_volume().ok()?;
+    let path = cstr16!("\\EFI\\ZUUPOS\\INITRAMFS.CPIO");
+    let mut initrd_file = root_dir
+        .open(path, FileMode::Read, FileAttribute::empty())
+        .ok()?;
+
+    if let FileType::Regular(mut file) = initrd_file.into_type().ok()? {
+        let mut info_buffer = [0u8; 256];
+        let file_size = file
+            .get_info::<FileInfo>(&mut info_buffer)
+            .ok()?
+            .file_size() as usize;
+
+        // Allocate physical memory for initramfs
+        let initramfs_start = alloc_physical_memory(file_size)?;
+        let mut buffer = Vec::with_capacity(file_size);
+        file.read(&mut buffer).ok()?;
+
+        // Copy initramfs to physical memory
+        unsafe {
+            core::ptr::copy_nonoverlapping(buffer.as_ptr(), initramfs_start as *mut u8, file_size);
+        }
+
+        Some((initramfs_start, file_size as u64))
+    } else {
+        None
+    }
+}
+
+fn alloc_physical_memory(size: usize) -> Option<u64> {
+    let mmap = uefi::boot::memory_map(MemoryType::LOADER_DATA).ok()?;
+
+    let pages_needed = (size + 4095) / 4096;
+    let mut consecutive_pages: u64 = 0;
+    let mut start_page = 0u64;
+
+    for desc in mmap.entries() {
+        if desc.ty == MemoryType::CONVENTIONAL {
+            let page_start = desc.phys_start / 4096;
+            let page_count = desc.page_count;
+
+            if page_start == start_page + consecutive_pages {
+                consecutive_pages += page_count;
+                if consecutive_pages >= pages_needed as u64 {
+                    let phys_start = start_page * 4096;
+                    let status = uefi::boot::allocate_pages(
+                        AllocateType::Address(phys_start as uefi::data_types::PhysicalAddress),
+                        MemoryType::LOADER_DATA,
+                        pages_needed,
+                    );
+                    if status.is_ok() {
+                        return Some(phys_start);
+                    }
+                }
+            } else {
+                start_page = page_start;
+                consecutive_pages = page_count;
+            }
+        }
+    }
+    None
 }
 
 fn setup_page_tables(
