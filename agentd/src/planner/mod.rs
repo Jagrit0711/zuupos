@@ -47,7 +47,11 @@ impl Planner {
         }
 
         self.plan_id += 1;
-        info!("[planner] Decomposing plan #{} ({} steps)", self.plan_id, raw_calls.len());
+        info!(
+            "[planner] Decomposing plan #{} ({} steps)",
+            self.plan_id,
+            raw_calls.len()
+        );
 
         // Build plan steps for display
         self.active_plan = raw_calls
@@ -61,12 +65,16 @@ impl Planner {
             .collect();
 
         // Emit plan to shell
-        self.ipc.send(ShellEvent::TaskPlan(self.active_plan.clone()));
+        self.ipc
+            .send(ShellEvent::TaskPlan(self.active_plan.clone()));
 
         // Queue all steps
         self.step_queue.clear();
         for (step, call) in self.active_plan.iter().cloned().zip(raw_calls.into_iter()) {
-            self.step_queue.push_back(QueuedStep { plan_step: step, tool_call: call });
+            self.step_queue.push_back(QueuedStep {
+                plan_step: step,
+                tool_call: call,
+            });
         }
 
         // Return all tool calls for sequential execution
@@ -85,7 +93,8 @@ impl Planner {
             step.status = StepStatus::Active;
         }
         if !self.active_plan.is_empty() {
-            self.ipc.send(ShellEvent::TaskPlan(self.active_plan.clone()));
+            self.ipc
+                .send(ShellEvent::TaskPlan(self.active_plan.clone()));
         }
     }
 
@@ -96,7 +105,8 @@ impl Planner {
         }
         // Refresh plan display
         if !self.active_plan.is_empty() {
-            self.ipc.send(ShellEvent::TaskPlan(self.active_plan.clone()));
+            self.ipc
+                .send(ShellEvent::TaskPlan(self.active_plan.clone()));
         }
     }
 
@@ -106,7 +116,8 @@ impl Planner {
             step.status = StepStatus::Failed;
         }
         if !self.active_plan.is_empty() {
-            self.ipc.send(ShellEvent::TaskPlan(self.active_plan.clone()));
+            self.ipc
+                .send(ShellEvent::TaskPlan(self.active_plan.clone()));
         }
     }
 }
@@ -164,7 +175,11 @@ fn summarize_args(args: &serde_json::Value) -> String {
             .map(|(k, v)| {
                 let val_str = match v {
                     serde_json::Value::String(s) => {
-                        if s.len() > 20 { format!("\"{}…\"", &s[..20]) } else { format!("\"{}\"", s) }
+                        if s.len() > 20 {
+                            format!("\"{}…\"", &s[..20])
+                        } else {
+                            format!("\"{}\"", s)
+                        }
                     }
                     _ => v.to_string(),
                 };

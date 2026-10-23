@@ -4,8 +4,8 @@
 //! agent runtime, declare their required capabilities, and communicate
 //! via IPC with the agent.
 
-use serde::{Deserialize, Serialize};
 use crate::capabilities::{Capability, CapabilitySet, CapabilityType};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppManifest {
@@ -169,11 +169,22 @@ pub enum ProcessState {
 /// IPC message for process management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProcessMessage {
-    Spawn { manifest: AppManifest, capabilities: Vec<Capability> },
-    Kill { pid: u32 },
-    Suspend { pid: u32 },
-    Resume { pid: u32 },
-    GetInfo { pid: u32 },
+    Spawn {
+        manifest: AppManifest,
+        capabilities: Vec<Capability>,
+    },
+    Kill {
+        pid: u32,
+    },
+    Suspend {
+        pid: u32,
+    },
+    Resume {
+        pid: u32,
+    },
+    GetInfo {
+        pid: u32,
+    },
     ListAll,
 }
 

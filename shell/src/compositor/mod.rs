@@ -81,7 +81,9 @@ impl ApplicationHandler for ShellApp {
             .with_decorations(true);
 
         let window = Arc::new(
-            event_loop.create_window(window_attrs).expect("Failed to create window"),
+            event_loop
+                .create_window(window_attrs)
+                .expect("Failed to create window"),
         );
 
         let size = window.inner_size();
@@ -93,7 +95,10 @@ impl ApplicationHandler for ShellApp {
         self.window = Some(window.clone());
         self.renderer = Some(renderer);
 
-        info!("[compositor] Shell started ({}x{})", self.width, self.height);
+        info!(
+            "[compositor] Shell started ({}x{})",
+            self.width, self.height
+        );
     }
 
     fn window_event(
@@ -171,7 +176,11 @@ impl ApplicationHandler for ShellApp {
                             ShellEvent::DockUpdate(_entry) => {
                                 log::debug!("[ipc] Dock update received");
                             }
-                            ShellEvent::Notification { title, body, urgency: _ } => {
+                            ShellEvent::Notification {
+                                title,
+                                body,
+                                urgency: _,
+                            } => {
                                 self.card_manager.add_card(Card {
                                     title,
                                     body,

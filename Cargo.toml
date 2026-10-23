@@ -16,8 +16,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/zuupos/zuupos"
 
 [workspace.dependencies]
-x86_64 = "0.15"
-acpi = "6.1.1"
+x86_64 = { version = "0.15", features = ["abi_x86_interrupt", "instructions"] }
+bitflags = { version = "2", default-features = false }
 
 [profile.release]
 opt-level = 3

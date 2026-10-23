@@ -40,7 +40,10 @@ extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
 }
 
 extern "x86-interrupt" fn gpf_handler(frame: InterruptStackFrame, error_code: u64) {
-    panic!("EXCEPTION: GENERAL PROTECTION FAULT (code={:#x})\n{:#?}", error_code, frame);
+    panic!(
+        "EXCEPTION: GENERAL PROTECTION FAULT (code={:#x})\n{:#?}",
+        error_code, frame
+    );
 }
 
 extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, _error_code: u64) -> ! {

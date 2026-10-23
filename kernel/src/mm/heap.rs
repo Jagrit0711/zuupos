@@ -12,9 +12,7 @@ static mut HEAP_SPACE: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
 
 pub fn init() {
     unsafe {
-        ALLOCATOR
-            .lock()
-            .init(HEAP_SPACE.as_mut_ptr(), HEAP_SIZE);
+        ALLOCATOR.lock().init(HEAP_SPACE.as_mut_ptr(), HEAP_SIZE);
     }
     log::debug!("[mm::heap] {}MiB heap initialized", HEAP_SIZE / 1024 / 1024);
 }

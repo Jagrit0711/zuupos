@@ -36,8 +36,8 @@ impl LlmEngine {
         // Try Ollama
         let ollama_url = std::env::var("ZUUPOS_OLLAMA_URL")
             .unwrap_or_else(|_| "http://localhost:11434".to_string());
-        let model_name = std::env::var("ZUUPOS_OLLAMA_MODEL")
-            .unwrap_or_else(|_| "llama3.2:latest".to_string());
+        let model_name =
+            std::env::var("ZUUPOS_OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2:latest".to_string());
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
@@ -47,7 +47,10 @@ impl LlmEngine {
         // Test Ollama connection
         let test_url = format!("{}/api/tags", ollama_url);
         if client.get(&test_url).send().await.is_ok() {
-            info!("[llm] Loaded Ollama backend: {} (model: {})", ollama_url, model_name);
+            info!(
+                "[llm] Loaded Ollama backend: {} (model: {})",
+                ollama_url, model_name
+            );
             return Self {
                 backend: LlmBackend::Ollama(OllamaEngine {
                     client,
@@ -68,12 +71,7 @@ impl LlmEngine {
         }
     }
 
-    pub async fn generate(
-        &mut self,
-        system: &str,
-        user: &str,
-        max_tokens: usize,
-    ) -> String {
+    pub async fn generate(&mut self, system: &str, user: &str, max_tokens: usize) -> String {
         match &mut self.backend {
             LlmBackend::Ollama(e) => e.generate(system, user, max_tokens, self.temperature).await,
             LlmBackend::LlamaCpp(e) => e.generate(system, user, max_tokens, self.temperature),
@@ -109,16 +107,14 @@ impl OllamaEngine {
         };
 
         match self.client.post(&url).json(&req).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<OllamaResponse>().await {
-                    Ok(data) if !data.response.trim().is_empty() => {
-                        let text = data.response.trim().to_string();
-                        info!("[llm] Ollama response ({} chars)", text.len());
-                        return text;
-                    }
-                    _ => warn!("[llm] Ollama returned empty response"),
+            Ok(resp) if resp.status().is_success() => match resp.json::<OllamaResponse>().await {
+                Ok(data) if !data.response.trim().is_empty() => {
+                    let text = data.response.trim().to_string();
+                    info!("[llm] Ollama response ({} chars)", text.len());
+                    return text;
                 }
-            }
+                _ => warn!("[llm] Ollama returned empty response"),
+            },
             Ok(resp) => warn!("[llm] Ollama HTTP {}", resp.status()),
             Err(e) => warn!("[llm] Ollama error: {e}"),
         }
@@ -138,7 +134,9 @@ impl LlamaCppEngine {
     fn new(model_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         // For now, just validate the file exists
         if std::path::Path::new(model_path).exists() {
-            Ok(Self { _model_path: model_path.to_string() })
+            Ok(Self {
+                _model_path: model_path.to_string(),
+            })
         } else {
             Err("Model file not found".into())
         }

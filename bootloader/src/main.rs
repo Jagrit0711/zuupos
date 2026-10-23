@@ -16,16 +16,16 @@ static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
 use alloc::vec::Vec;
 use core::mem;
 use log::info;
-use uefi::prelude::*;
-use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
-use uefi::proto::media::file::{File, FileAttribute, FileMode, FileInfo, FileType};
-use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::mem::memory_map::{MemoryMap, MemoryType};
-use uefi::system::with_config_table;
-use uefi::table::cfg::{ACPI2_GUID, ACPI_GUID};
-use uefi::data_types::PhysicalAddress;
 use uefi::boot::{AllocateType, MemoryDescriptor};
 use uefi::cstr16;
+use uefi::data_types::PhysicalAddress;
+use uefi::mem::memory_map::{MemoryMap, MemoryType};
+use uefi::prelude::*;
+use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType};
+use uefi::proto::media::fs::SimpleFileSystem;
+use uefi::system::with_config_table;
+use uefi::table::cfg::{ACPI2_GUID, ACPI_GUID};
 
 /// Boot information passed to the kernel.
 /// Must be kept in sync with `kernel/src/arch/x86_64/boot_info.rs`.
@@ -63,25 +63,49 @@ fn main() -> Status {
     info!("Bootloader Phase 1.1 initializing...");
 
     // --- Acquire framebuffer via GOP ---
-    let (width, height, fb_addr, stride, pixel_format) = acquire_framebuffer().expect("Failed to acquire framebuffer");
-    info!("Framebuffer: {}x{} @ {:#x}, stride={}", width, height, fb_addr, stride);
+    let (width, height, fb_addr, stride, pixel_format) =
+        acquire_framebuffer().expect("Failed to acquire framebuffer");
+    info!(
+        "Framebuffer: {}x{} @ {:#x}, stride={}",
+        width, height, fb_addr, stride
+    );
     draw_boot_splash(fb_addr, width, height, stride);
 
     // --- Get memory map ---
-    let (memory_map_addr, memory_map_len, memory_map_desc_size) = get_memory_map().expect("Failed to get memory map");
-    info!("Memory map: {} entries @ {:#x}", memory_map_len / memory_map_desc_size, memory_map_addr);
+    let (memory_map_addr, memory_map_len, memory_map_desc_size) =
+        get_memory_map().expect("Failed to get memory map");
+    info!(
+        "Memory map: {} entries @ {:#x}",
+        memory_map_len / memory_map_desc_size,
+        memory_map_addr
+    );
 
     // --- Find RSDP (ACPI) ---
     let rsdp_addr = find_rsdp().unwrap_or(0);
     info!("RSDP: {:#x}", rsdp_addr);
 
     // --- Load kernel ELF ---
-    let (kernel_phys_start, kernel_phys_end, kernel_entry) = load_kernel().expect("Failed to load kernel");
-    info!("Kernel loaded: {:#x} - {:#x}, entry: {:#x}", kernel_phys_start, kernel_phys_end, kernel_entry);
+    let (kernel_phys_start, kernel_phys_end, kernel_entry) =
+        load_kernel().expect("Failed to load kernel");
+    info!(
+        "Kernel loaded: {:#x} - {:#x}, entry: {:#x}",
+        kernel_phys_start, kernel_phys_end, kernel_entry
+    );
 
     // --- Set up page tables (higher-half kernel) ---
-    let (pml4_addr, physical_memory_offset) = setup_page_tables(kernel_phys_start, kernel_phys_end, fb_addr, width, height, stride).expect("Failed to set up page tables");
-    info!("Page tables: PML4={:#x}, phys_offset={:#x}", pml4_addr, physical_memory_offset);
+    let (pml4_addr, physical_memory_offset) = setup_page_tables(
+        kernel_phys_start,
+        kernel_phys_end,
+        fb_addr,
+        width,
+        height,
+        stride,
+    )
+    .expect("Failed to set up page tables");
+    info!(
+        "Page tables: PML4={:#x}, phys_offset={:#x}",
+        pml4_addr, physical_memory_offset
+    );
 
     // --- Prepare BootInfo ---
     let boot_info = BootInfo {
@@ -190,11 +214,16 @@ fn load_kernel() -> Option<(u64, u64, u64)> {
 
     let mut root_dir = fs.open_volume().ok()?;
     let path = cstr16!("\\EFI\\ZUUPOS\\KERNEL.ELF");
-    let mut kernel_file = root_dir.open(path, FileMode::Read, FileAttribute::empty()).ok()?;
+    let mut kernel_file = root_dir
+        .open(path, FileMode::Read, FileAttribute::empty())
+        .ok()?;
 
     if let FileType::Regular(mut file) = kernel_file.into_type().ok()? {
         let mut info_buffer = [0u8; 256];
-        let file_size = file.get_info::<FileInfo>(&mut info_buffer).ok()?.file_size() as usize;
+        let file_size = file
+            .get_info::<FileInfo>(&mut info_buffer)
+            .ok()?
+            .file_size() as usize;
         let mut buffer = Vec::with_capacity(file_size);
         file.read(&mut buffer).ok()?;
 
@@ -233,8 +262,8 @@ fn parse_elf_entry(buffer: &[u8], load_addr: u64) -> Option<u64> {
     }
     // Entry point at offset 24 (8 bytes)
     let entry = u64::from_le_bytes([
-        buffer[24], buffer[25], buffer[26], buffer[27],
-        buffer[28], buffer[29], buffer[30], buffer[31],
+        buffer[24], buffer[25], buffer[26], buffer[27], buffer[28], buffer[29], buffer[30],
+        buffer[31],
     ]);
     Some(load_addr + entry)
 }
@@ -326,7 +355,8 @@ fn setup_page_tables(
             unsafe { *(pd_kernel as *mut u64).add(pd_idx) = pt_fb | 0x3 };
         }
         let pt_fb = unsafe { *(pd_kernel as *mut u64).add(pd_idx) & !0xFFF };
-        unsafe { *(pt_fb as *mut u64).add(pt_idx) = phys | 0x3 | 0x80000000000 }; // NX bit
+        unsafe { *(pt_fb as *mut u64).add(pt_idx) = phys | 0x3 | 0x80000000000 };
+        // NX bit
     }
 
     // Physical memory offset = KERNEL_BASE (for higher-half direct mapping)

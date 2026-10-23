@@ -1,7 +1,6 @@
 //! Global Descriptor Table (GDT) for x86-64.
 //! Required for segment selectors used by syscall/sysret.
 
-use spinning_top::Spinlock;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
 use x86_64::structures::tss::TaskStateSegment;
 use x86_64::VirtAddr;
@@ -14,7 +13,7 @@ lazy_static::lazy_static! {
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
             const STACK_SIZE: usize = 4096 * 5;
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
-            let stack_start = VirtAddr::from_ptr(unsafe { &STACK });
+            let stack_start = VirtAddr::from_ptr(unsafe { &raw const STACK });
             stack_start + STACK_SIZE as u64
         };
         tss

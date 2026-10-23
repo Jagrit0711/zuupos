@@ -85,7 +85,10 @@ impl Tool for DisplayCardTool {
         "display_card"
     }
     async fn execute(&self, args: &serde_json::Value) -> String {
-        let title = args["title"].as_str().unwrap_or("Zuupos Notification").to_string();
+        let title = args["title"]
+            .as_str()
+            .unwrap_or("Zuupos Notification")
+            .to_string();
         let body = args["body"].as_str().unwrap_or("").to_string();
         let card_type_str = args["type"].as_str().unwrap_or("info");
         let card_type = match card_type_str {
@@ -124,7 +127,8 @@ impl Tool for SpeakTool {
         let priority = args["priority"].as_str().unwrap_or("normal");
         info!("[tool::speak] [{priority}] \"{text}\"");
         self.ipc.send(ShellEvent::AvatarEmotion(Emotion::Speaking));
-        self.ipc.send(ShellEvent::StatusUpdate(format!("Speaking: {}", text)));
+        self.ipc
+            .send(ShellEvent::StatusUpdate(format!("Speaking: {}", text)));
         format!("Spoken: {text}")
     }
 }

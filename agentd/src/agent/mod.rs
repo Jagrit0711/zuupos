@@ -41,7 +41,10 @@ pub struct Agent {
 
 impl Agent {
     pub async fn new(config: AgentConfig) -> Self {
-        info!("[agent] Initializing agent with model: {}", config.model_path);
+        info!(
+            "[agent] Initializing agent with model: {}",
+            config.model_path
+        );
         let llm = LlmEngine::load(&config.model_path, config.temperature).await;
         let context = ContextEngine::new(config.context_window);
         let ipc = IpcClient::new();
@@ -102,7 +105,8 @@ impl Agent {
             info!("[agent] Plan: {} steps", tool_calls.len());
 
             // ── 4. ACT ───────────────────────────────────────────────────────
-            self.ipc.send(ShellEvent::AvatarEmotion(Emotion::Processing));
+            self.ipc
+                .send(ShellEvent::AvatarEmotion(Emotion::Processing));
             let results = self.act(tool_calls).await;
 
             // ── 5. REFLECT ───────────────────────────────────────────────────
@@ -244,12 +248,7 @@ Output JSON tool calls for each action (one per line, no other text needed):"#,
 
     // ── REFLECT ──────────────────────────────────────────────────────────────
 
-    async fn reflect(
-        &mut self,
-        perception: &Perception,
-        reasoning: &str,
-        results: &[ToolResult],
-    ) {
+    async fn reflect(&mut self, perception: &Perception, reasoning: &str, results: &[ToolResult]) {
         self.context
             .store_episode(perception, reasoning, results)
             .await;

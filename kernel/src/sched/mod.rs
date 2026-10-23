@@ -25,19 +25,43 @@ pub enum ProcessState {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SavedRegisters {
-    pub rax: u64, pub rbx: u64, pub rcx: u64, pub rdx: u64,
-    pub rsi: u64, pub rdi: u64, pub rbp: u64, pub rsp: u64,
-    pub r8: u64, pub r9: u64, pub r10: u64, pub r11: u64,
-    pub r12: u64, pub r13: u64, pub r14: u64, pub r15: u64,
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub rsp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
 }
 
 impl SavedRegisters {
     pub fn new() -> Self {
         Self {
-            rax: 0, rbx: 0, rcx: 0, rdx: 0,
-            rsi: 0, rdi: 0, rbp: 0, rsp: 0,
-            r8: 0, r9: 0, r10: 0, r11: 0,
-            r12: 0, r13: 0, r14: 0, r15: 0,
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
         }
     }
 }
@@ -58,7 +82,9 @@ impl Process {
     fn new(pid: u32, entry: u64, user_stack: VirtAddr, page_table: PhysAddr) -> Self {
         let kernel_stack_addr = super::mm::phys::alloc_frames(KERNEL_STACK_SIZE / 4096)
             .expect("Failed to allocate kernel stack");
-        let kernel_stack = VirtAddr::new(super::mm::virt::phys_to_virt(kernel_stack_addr) + KERNEL_STACK_SIZE as u64);
+        let kernel_stack = VirtAddr::new(
+            super::mm::virt::phys_to_virt(kernel_stack_addr) + KERNEL_STACK_SIZE as u64,
+        );
 
         let mut regs = SavedRegisters::new();
         regs.rsp = kernel_stack.as_u64();
@@ -150,7 +176,9 @@ pub extern "C" fn tick_and_switch_naked(saved_regs: *mut SavedRegisters) {
 
 // Naked entry point for timer interrupt - saves all registers and calls tick_and_switch_naked
 #[unsafe(naked)]
-pub unsafe extern "C" fn timer_handler_entry(_frame: *mut x86_64::structures::idt::InterruptStackFrame) {
+pub unsafe extern "C" fn timer_handler_entry(
+    _frame: *mut x86_64::structures::idt::InterruptStackFrame,
+) {
     core::arch::naked_asm!(
         // Save all general-purpose registers
         "push rax", "push rbx", "push rcx", "push rdx",
@@ -208,7 +236,9 @@ fn idle_loop() -> ! {
 
 pub fn spawn_process(entry: u64, user_stack: VirtAddr, page_table: PhysAddr) -> u32 {
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed) as u32;
-    let process = Arc::new(Spinlock::new(Process::new(pid, entry, user_stack, page_table)));
+    let process = Arc::new(Spinlock::new(Process::new(
+        pid, entry, user_stack, page_table,
+    )));
 
     PROCESS_LIST.lock().push(process.clone());
     RUN_QUEUE.lock().push_back(process);

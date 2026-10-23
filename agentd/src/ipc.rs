@@ -62,7 +62,7 @@ pub enum StepStatus {
 /// Real-time system hardware metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
-    pub cpu_usage: f32,       // 0..100 percent
+    pub cpu_usage: f32, // 0..100 percent
     pub mem_used_mb: u64,
     pub mem_total_mb: u64,
     pub battery_pct: Option<f32>,
@@ -74,7 +74,7 @@ pub struct SystemMetrics {
 pub struct DockEntry {
     pub id: String,
     pub label: String,
-    pub icon_char: char,      // Unicode icon character
+    pub icon_char: char, // Unicode icon character
     pub active: bool,
     pub pulse: bool,
 }
@@ -96,7 +96,11 @@ pub enum ShellEvent {
     /// Update a dock entry.
     DockUpdate(DockEntry),
     /// Notification with optional urgency level (0=low, 1=normal, 2=critical).
-    Notification { title: String, body: String, urgency: u8 },
+    Notification {
+        title: String,
+        body: String,
+        urgency: u8,
+    },
     /// Signal to the shell to enter a boot splash.
     BootStarted,
     /// Signal that the agent is fully initialised.

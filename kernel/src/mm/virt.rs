@@ -2,13 +2,14 @@
 
 use super::super::arch::x86_64::boot_info::BootInfo;
 use super::phys::alloc_frames;
+use spinning_top::Spinlock;
 use x86_64::{
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB,
+        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
+        Size4KiB,
     },
     VirtAddr,
 };
-use spinning_top::Spinlock;
 
 const KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
 const KERNEL_OFFSET: u64 = 0xFFFF_8000_0000_0000;
@@ -19,14 +20,18 @@ static VIRT_MAPPER: Spinlock<Option<OffsetPageTable<'static>>> = Spinlock::new(N
 pub fn init(boot_info: &BootInfo) {
     let physical_memory_offset = VirtAddr::new(boot_info.physical_memory_offset);
 
-    let level_4_table = unsafe {
-        &mut *(boot_info.pml4_addr as *mut PageTable)
-    };
+    let level_4_table = unsafe { &mut *(boot_info.pml4_addr as *mut PageTable) };
 
     let mut mapper = unsafe { OffsetPageTable::new(level_4_table, physical_memory_offset) };
 
-    log::info!("[mm::virt] Setting up higher-half kernel mapping at {:#x}", KERNEL_BASE);
-    log::info!("[mm::virt] Identity-mapping first {} GiB", IDENTITY_MAP_LIMIT / (1024 * 1024 * 1024));
+    log::info!(
+        "[mm::virt] Setting up higher-half kernel mapping at {:#x}",
+        KERNEL_BASE
+    );
+    log::info!(
+        "[mm::virt] Identity-mapping first {} GiB",
+        IDENTITY_MAP_LIMIT / (1024 * 1024 * 1024)
+    );
 
     map_kernel(boot_info, &mut mapper);
     identity_map_low_memory(&mut mapper);
@@ -40,17 +45,21 @@ fn map_kernel(boot_info: &BootInfo, mapper: &mut OffsetPageTable) {
     let kernel_start = boot_info.kernel_phys_start;
     let kernel_end = boot_info.kernel_phys_end;
 
-    let start_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(KERNEL_BASE + kernel_start));
-    let end_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(KERNEL_BASE + kernel_end));
+    let start_page: Page<Size4KiB> =
+        Page::containing_address(VirtAddr::new(KERNEL_BASE + kernel_start));
+    let end_page: Page<Size4KiB> =
+        Page::containing_address(VirtAddr::new(KERNEL_BASE + kernel_end));
 
     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
 
     for page in Page::range_inclusive(start_page, end_page) {
-        let frame = PhysFrame::containing_address(
-            x86_64::PhysAddr::new(kernel_start + (page.start_address().as_u64() - KERNEL_BASE))
-        );
+        let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(
+            kernel_start + (page.start_address().as_u64() - KERNEL_BASE),
+        ));
         unsafe {
-            mapper.map_to(page, frame, flags, &mut BuddyFrameAllocator).expect("kernel map failed");
+            mapper
+                .map_to(page, frame, flags, &mut BuddyFrameAllocator)
+                .expect("kernel map failed");
         }
     }
 }
@@ -60,9 +69,7 @@ fn identity_map_low_memory(mapper: &mut OffsetPageTable) {
 
     for page_addr in (0..IDENTITY_MAP_LIMIT).step_by(4096) {
         let page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(page_addr));
-        let frame = PhysFrame::containing_address(
-            x86_64::PhysAddr::new(page_addr)
-        );
+        let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(page_addr));
         unsafe {
             let _ = mapper.map_to(page, frame, flags, &mut BuddyFrameAllocator);
         }
@@ -73,9 +80,7 @@ struct BuddyFrameAllocator;
 
 unsafe impl FrameAllocator<Size4KiB> for BuddyFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
-        alloc_frames(1).map(|addr| {
-            PhysFrame::containing_address(x86_64::PhysAddr::new(addr))
-        })
+        alloc_frames(1).map(|addr| PhysFrame::containing_address(x86_64::PhysAddr::new(addr)))
     }
 }
 
@@ -89,9 +94,9 @@ pub fn map(phys: u64, virt: u64, size: u64, flags: u64) {
         let end_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(virt + size - 1));
 
         for page in Page::range_inclusive(start_page, end_page) {
-            let frame = PhysFrame::containing_address(
-                x86_64::PhysAddr::new(phys + (page.start_address().as_u64() - virt))
-            );
+            let frame = PhysFrame::containing_address(x86_64::PhysAddr::new(
+                phys + (page.start_address().as_u64() - virt),
+            ));
             unsafe {
                 let _ = mapper.map_to(page, frame, pt_flags, &mut BuddyFrameAllocator);
             }
@@ -124,6 +129,18 @@ pub fn get_mapper() -> Option<&'static OffsetPageTable<'static>> {
 
 pub fn map_framebuffer(fb_addr: u64, fb_size: u64) {
     let virt_addr = KERNEL_BASE + fb_addr;
-    map(fb_addr, virt_addr, fb_size, PageTableFlags::PRESENT.bits() | PageTableFlags::WRITABLE.bits() | PageTableFlags::NO_EXECUTE.bits());
-    log::info!("[mm::virt] Framebuffer mapped: {:#x} -> {:#x} ({} bytes)", fb_addr, virt_addr, fb_size);
+    map(
+        fb_addr,
+        virt_addr,
+        fb_size,
+        PageTableFlags::PRESENT.bits()
+            | PageTableFlags::WRITABLE.bits()
+            | PageTableFlags::NO_EXECUTE.bits(),
+    );
+    log::info!(
+        "[mm::virt] Framebuffer mapped: {:#x} -> {:#x} ({} bytes)",
+        fb_addr,
+        virt_addr,
+        fb_size
+    );
 }

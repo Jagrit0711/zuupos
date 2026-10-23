@@ -2,9 +2,9 @@
 #![allow(dead_code)]
 
 // Background layers
-pub const BG_BASE: u32 = 0x050508;          // Near-black deep navy
-pub const BG_GRADIENT_A: u32 = 0x0a0a14;   // Deep blue-black
-pub const BG_GRADIENT_B: u32 = 0x07040f;   // Deep purple-black
+pub const BG_BASE: u32 = 0x050508; // Near-black deep navy
+pub const BG_GRADIENT_A: u32 = 0x0a0a14; // Deep blue-black
+pub const BG_GRADIENT_B: u32 = 0x07040f; // Deep purple-black
 
 // Accent colors
 pub const ACCENT_PURPLE: u32 = 0x7c3aed;

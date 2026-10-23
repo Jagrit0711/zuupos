@@ -14,8 +14,10 @@ path = "src/main.rs"
 [dependencies]
 # For logging (no_std compatible)
 log = { version = "0.4", default-features = false }
-# Bare-metal abstractions
-x86_64 = { workspace = true }
+# Bare-metal abstractions (0.15 with bitflags 2.x no_std)
+x86_64 = { version = "0.15", features = ["abi_x86_interrupt", "instructions"] }
+# bitflags 2.x with no_std (disable std feature)
+bitflags = { version = "2", default-features = false }
 # Spinning mutex (no OS needed)
 spinning_top = "0.3"
 # Bitmap allocator for page frames
@@ -23,13 +25,11 @@ linked_list_allocator = "0.10"
 # UART serial
 uart_16550 = "0.3"
 # For volatile reads/writes
-volatile = "0.5"
-# ACPI parsing
-acpi = { workspace = true }
+volatile = "0.4"
 # For lazy initialization
 conquer-once = { version = "0.4", default-features = false }
 # Interrupt handling
-pic8259 = "0.10"
+pic8259 = "0.11"
 lazy_static = { version = "1", features = ["spin_no_std"] }
 
 [features]

@@ -1,7 +1,7 @@
 //! NVMe (Non-Volatile Memory Express) driver skeleton.
 //! Provides basic block device access for NVMe SSDs.
 
-use super::pci::{PciDevice, map_bar};
+use super::pci::{map_bar, PciDevice};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 use spinning_top::Spinlock;
@@ -44,10 +44,22 @@ impl NvmeQueue {
         let mut entries = Vec::with_capacity(size as usize);
         for _ in 0..size {
             entries.push(NvmeQueueEntry {
-                dw0: 0, dw1: 0, dw2: 0, dw3: 0,
-                dw4: 0, dw5: 0, dw6: 0, dw7: 0,
-                dw8: 0, dw9: 0, dw10: 0, dw11: 0,
-                dw12: 0, dw13: 0, dw14: 0, dw15: 0,
+                dw0: 0,
+                dw1: 0,
+                dw2: 0,
+                dw3: 0,
+                dw4: 0,
+                dw5: 0,
+                dw6: 0,
+                dw7: 0,
+                dw8: 0,
+                dw9: 0,
+                dw10: 0,
+                dw11: 0,
+                dw12: 0,
+                dw13: 0,
+                dw14: 0,
+                dw15: 0,
             });
         }
         Self {
@@ -83,18 +95,18 @@ impl NvmeQueue {
 
 #[repr(C)]
 struct NvmeRegisters {
-    pub cap: u64,           // 0x00 - Controller Capabilities
-    pub vs: u32,            // 0x08 - Version
-    pub intms: u32,         // 0x0C - Interrupt Mask Set
-    pub intmc: u32,         // 0x10 - Interrupt Mask Clear
-    pub cc: u32,            // 0x14 - Controller Configuration
-    _reserved1: u32,        // 0x18
-    pub csts: u32,          // 0x1C - Controller Status
-    pub nssr: u32,          // 0x20 - NVM Subsystem Reset
-    pub aqa: u32,           // 0x24 - Admin Queue Attributes
-    pub asq: u64,           // 0x28 - Admin Submission Queue Base Address
-    pub acq: u64,           // 0x30 - Admin Completion Queue Base Address
-    // ... more registers
+    pub cap: u64,    // 0x00 - Controller Capabilities
+    pub vs: u32,     // 0x08 - Version
+    pub intms: u32,  // 0x0C - Interrupt Mask Set
+    pub intmc: u32,  // 0x10 - Interrupt Mask Clear
+    pub cc: u32,     // 0x14 - Controller Configuration
+    _reserved1: u32, // 0x18
+    pub csts: u32,   // 0x1C - Controller Status
+    pub nssr: u32,   // 0x20 - NVM Subsystem Reset
+    pub aqa: u32,    // 0x24 - Admin Queue Attributes
+    pub asq: u64,    // 0x28 - Admin Submission Queue Base Address
+    pub acq: u64,    // 0x30 - Admin Completion Queue Base Address
+                     // ... more registers
 }
 
 pub struct NvmeController {
@@ -107,7 +119,11 @@ pub struct NvmeController {
 
 impl NvmeController {
     pub fn init(device: PciDevice) -> Option<Self> {
-        log::info!("[nvme] Initializing NVMe controller {:04x}:{:04x}", device.vendor_id, device.device_id);
+        log::info!(
+            "[nvme] Initializing NVMe controller {:04x}:{:04x}",
+            device.vendor_id,
+            device.device_id
+        );
 
         let bar0_virt = map_bar(&device, 0)?;
         let regs = unsafe { &mut *(bar0_virt.as_u64() as *mut NvmeRegisters) };
@@ -185,11 +201,21 @@ impl NvmeController {
         None // Stub
     }
 
-    pub fn read_blocks(&mut self, _lba: u64, _count: u32, _buf: &mut [u8]) -> Result<(), &'static str> {
+    pub fn read_blocks(
+        &mut self,
+        _lba: u64,
+        _count: u32,
+        _buf: &mut [u8],
+    ) -> Result<(), &'static str> {
         Err("Not implemented")
     }
 
-    pub fn write_blocks(&mut self, _lba: u64, _count: u32, _buf: &[u8]) -> Result<(), &'static str> {
+    pub fn write_blocks(
+        &mut self,
+        _lba: u64,
+        _count: u32,
+        _buf: &[u8],
+    ) -> Result<(), &'static str> {
         Err("Not implemented")
     }
 }
@@ -198,7 +224,11 @@ static NVME_CONTROLLER: Spinlock<Option<NvmeController>> = Spinlock::new(None);
 
 pub fn init() {
     if let Some(device) = super::pci::find_device(NVME_CLASS_CODE, NVME_SUBCLASS) {
-        log::info!("[nvme] Found NVMe device: {:04x}:{:04x}", device.vendor_id, device.device_id);
+        log::info!(
+            "[nvme] Found NVMe device: {:04x}:{:04x}",
+            device.vendor_id,
+            device.device_id
+        );
         if let Some(controller) = NvmeController::init(device) {
             *NVME_CONTROLLER.lock() = Some(controller);
             log::info!("[nvme] NVMe driver initialized");

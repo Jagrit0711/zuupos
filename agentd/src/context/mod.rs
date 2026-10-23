@@ -9,7 +9,7 @@
 
 use crate::tools::ToolResult;
 use log::{debug, warn};
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
@@ -53,9 +53,7 @@ impl ContextEngine {
     }
 
     fn open_db() -> Option<Connection> {
-        let mut path = PathBuf::from(
-            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
-        );
+        let mut path = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
         path.push(".zuupos");
         if let Err(e) = std::fs::create_dir_all(&path) {
             warn!("[context] Could not create ~/.zuupos: {e}");
@@ -95,7 +93,8 @@ impl ContextEngine {
 
     /// Return a brief text summary of recent context for the LLM prompt.
     pub fn get_summary(&self) -> String {
-        let recent: Vec<&str> = self.working_memory
+        let recent: Vec<&str> = self
+            .working_memory
             .iter()
             .rev()
             .take(5)

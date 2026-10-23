@@ -47,7 +47,8 @@ pub struct BuddyAllocator {
 
 impl BuddyAllocator {
     fn new() -> Self {
-        let free_lists: [alloc::collections::VecDeque<u64>; MAX_ORDER + 1] = core::array::from_fn(|_| alloc::collections::VecDeque::new());
+        let free_lists: [alloc::collections::VecDeque<u64>; MAX_ORDER + 1] =
+            core::array::from_fn(|_| alloc::collections::VecDeque::new());
         Self {
             free_lists,
             total_frames: 0,
@@ -170,12 +171,15 @@ pub fn init(boot_info: &BootInfo) {
             _ => MemoryType::Reserved,
         };
 
-        if matches!(mem_type, MemoryType::Available
-            | MemoryType::BootServicesCode
-            | MemoryType::BootServicesData
-            | MemoryType::LoaderCode
-            | MemoryType::LoaderData
-            | MemoryType::AcpiReclaim) {
+        if matches!(
+            mem_type,
+            MemoryType::Available
+                | MemoryType::BootServicesCode
+                | MemoryType::BootServicesData
+                | MemoryType::LoaderCode
+                | MemoryType::LoaderData
+                | MemoryType::AcpiReclaim
+        ) {
             let base = desc.physical_start;
             let pages = desc.number_of_pages;
             allocator.add_region(base, pages);
@@ -195,7 +199,10 @@ pub fn init(boot_info: &BootInfo) {
 }
 
 pub fn alloc_frames(n: usize) -> Option<u64> {
-    PHYS_ALLOCATOR.lock().as_mut().and_then(|a| a.alloc_frames(n))
+    PHYS_ALLOCATOR
+        .lock()
+        .as_mut()
+        .and_then(|a| a.alloc_frames(n))
 }
 
 pub fn free_frames(base: u64, n: usize) {
@@ -205,15 +212,24 @@ pub fn free_frames(base: u64, n: usize) {
 }
 
 pub fn total_frames() -> u64 {
-    PHYS_ALLOCATOR.lock().as_ref().map(|a| a.total_frames).unwrap_or(0)
+    PHYS_ALLOCATOR
+        .lock()
+        .as_ref()
+        .map(|a| a.total_frames)
+        .unwrap_or(0)
 }
 
 pub fn used_frames() -> u64 {
-    PHYS_ALLOCATOR.lock().as_ref().map(|a| a.used_frames).unwrap_or(0)
+    PHYS_ALLOCATOR
+        .lock()
+        .as_ref()
+        .map(|a| a.used_frames)
+        .unwrap_or(0)
 }
 
 unsafe impl FrameAllocator<Size4KiB> for BuddyAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
-        self.alloc(0).map(|addr| PhysFrame::containing_address(x86_64::PhysAddr::new(addr)))
+        self.alloc(0)
+            .map(|addr| PhysFrame::containing_address(x86_64::PhysAddr::new(addr)))
     }
 }

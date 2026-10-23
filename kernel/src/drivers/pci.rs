@@ -41,9 +41,14 @@ pub fn init() {
     for dev in PCI_DEVICES.lock().iter() {
         log::info!(
             "[pci] {:02x}:{:02x}.{:x} [{:04x}:{:04x}] class={:02x}{:02x}{:02x} IRQ={}",
-            dev.address.bus, dev.address.device, dev.address.function,
-            dev.vendor_id, dev.device_id,
-            dev.class_code, dev.subclass, dev.prog_if,
+            dev.address.bus,
+            dev.address.device,
+            dev.address.function,
+            dev.vendor_id,
+            dev.device_id,
+            dev.class_code,
+            dev.subclass,
+            dev.prog_if,
             dev.irq
         );
     }
@@ -52,7 +57,11 @@ pub fn init() {
 fn enumerate_bus(bus: u8) {
     for device in 0..32 {
         for function in 0..8 {
-            let addr = PciAddress { bus, device, function };
+            let addr = PciAddress {
+                bus,
+                device,
+                function,
+            };
             let vendor_id = read_config(addr, 0x00);
             if vendor_id == 0xFFFF {
                 if function == 0 {
@@ -152,11 +161,19 @@ pub fn write_config(addr: PciAddress, offset: u8, value: u32) {
 }
 
 pub fn find_device(class_code: u8, subclass: u8) -> Option<PciDevice> {
-    PCI_DEVICES.lock().iter().find(|d| d.class_code == class_code && d.subclass == subclass).copied()
+    PCI_DEVICES
+        .lock()
+        .iter()
+        .find(|d| d.class_code == class_code && d.subclass == subclass)
+        .copied()
 }
 
 pub fn find_device_by_id(vendor_id: u16, device_id: u16) -> Option<PciDevice> {
-    PCI_DEVICES.lock().iter().find(|d| d.vendor_id == vendor_id && d.device_id == device_id).copied()
+    PCI_DEVICES
+        .lock()
+        .iter()
+        .find(|d| d.vendor_id == vendor_id && d.device_id == device_id)
+        .copied()
 }
 
 pub fn get_all_devices() -> Vec<PciDevice> {

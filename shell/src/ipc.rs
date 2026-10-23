@@ -57,7 +57,11 @@ pub enum ShellEvent {
     Metrics(SystemMetrics),
     TaskPlan(Vec<PlanStep>),
     DockUpdate(DockEntry),
-    Notification { title: String, body: String, urgency: u8 },
+    Notification {
+        title: String,
+        body: String,
+        urgency: u8,
+    },
     BootStarted,
     AgentReady,
 }
@@ -125,7 +129,11 @@ fn handle_client(stream: UnixStream, queue: Arc<Mutex<Vec<ShellEvent>>>) {
                         queue.lock().unwrap().push(event);
                     }
                     Err(e) => {
-                        warn!("[ipc] Parse error: {} | line: {}", e, &trimmed[..trimmed.len().min(60)]);
+                        warn!(
+                            "[ipc] Parse error: {} | line: {}",
+                            e,
+                            &trimmed[..trimmed.len().min(60)]
+                        );
                     }
                 }
             }

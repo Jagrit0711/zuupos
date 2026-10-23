@@ -11,8 +11,14 @@ pub mod ui;
 
 /// Prelude for common imports
 pub mod prelude {
-    pub use crate::app::{App, AppManifest, AppState, AppError, ProcessInfo, ProcessState};
+    pub use crate::app::{App, AppError, AppManifest, AppState, ProcessInfo, ProcessState};
     pub use crate::capabilities::{Capability, CapabilitySet, CapabilityType};
-    pub use crate::tools::{ToolSchema, ToolParameters, ParameterProperty, ToolCall, ToolResult, ToolHandler, ToolRegistry, FunctionTool};
-    pub use crate::ui::{Card, CardType, CardPriority, CardAction, ActionType, CardStyle, CardWidth, CardHeight, Widget, Emotion, HudMetrics, ShellMessage};
+    pub use crate::tools::{
+        FunctionTool, ParameterProperty, ToolCall, ToolHandler, ToolParameters, ToolRegistry,
+        ToolResult, ToolSchema,
+    };
+    pub use crate::ui::{
+        ActionType, Card, CardAction, CardHeight, CardPriority, CardStyle, CardType, CardWidth,
+        Emotion, HudMetrics, ShellMessage, Widget,
+    };
 }

@@ -15,8 +15,8 @@ use crate::cards::{Card, CardType};
 use crate::ipc::{PlanStep, StepStatus, SystemMetrics};
 use crate::theme::*;
 use fontdue::{Font, FontSettings};
-use rand::{Rng, SeedableRng};
 use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ struct Particle {
     y: f32,
     vx: f32,
     vy: f32,
-    life: f32,   // 0..1, fades out
+    life: f32, // 0..1, fades out
     max_life: f32,
     size: f32,
     color: u32,
@@ -198,7 +198,8 @@ impl Renderer {
     fn update_particles(&mut self, _tick: u64) {
         let w = self.width;
         let h = self.height;
-        let dead: Vec<usize> = self.particles
+        let dead: Vec<usize> = self
+            .particles
             .iter()
             .enumerate()
             .filter(|(_, p)| p.life <= 0.0)
@@ -215,8 +216,12 @@ impl Renderer {
             p.life -= 1.0 / p.max_life;
 
             // Wrap horizontally
-            if p.x < 0.0 { p.x += w as f32; }
-            if p.x >= w as f32 { p.x -= w as f32; }
+            if p.x < 0.0 {
+                p.x += w as f32;
+            }
+            if p.x >= w as f32 {
+                p.x -= w as f32;
+            }
         }
     }
 
@@ -224,14 +229,19 @@ impl Renderer {
         let w = self.width;
         let h = self.height;
         for p in &self.particles {
-            if p.life <= 0.0 { continue; }
+            if p.life <= 0.0 {
+                continue;
+            }
             let alpha = (p.life * 0.55).min(1.0);
             let px = p.x as i32;
             let py = p.y as i32;
-            if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 { continue; }
+            if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
+                continue;
+            }
             let idx = (py as u32 * w + px as u32) as usize;
             if idx < self.buf.len() {
-                self.buf[idx] = blend_pixel(self.buf[idx], p.color, alpha * (p.size / 3.0).min(1.0));
+                self.buf[idx] =
+                    blend_pixel(self.buf[idx], p.color, alpha * (p.size / 3.0).min(1.0));
             }
             // Draw a small soft dot (radius 1)
             if p.size > 1.5 {
@@ -239,10 +249,13 @@ impl Renderer {
                     for dx in -1i32..=1 {
                         let nx = px + dx;
                         let ny = py + dy;
-                        if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 { continue; }
+                        if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                            continue;
+                        }
                         let ni = (ny as u32 * w + nx as u32) as usize;
                         if ni < self.buf.len() {
-                            let dist_a = alpha * 0.35 * (1.0 - ((dx * dx + dy * dy) as f32).sqrt() * 0.5);
+                            let dist_a =
+                                alpha * 0.35 * (1.0 - ((dx * dx + dy * dy) as f32).sqrt() * 0.5);
                             self.buf[ni] = blend_pixel(self.buf[ni], p.color, dist_a.max(0.0));
                         }
                     }
@@ -258,9 +271,14 @@ impl Renderer {
         // Translucent bar background
         for x in 0..w {
             for y in 0..STATUSBAR_HEIGHT {
-                let base = if y == STATUSBAR_HEIGHT - 1 { 0x1a1a2e } else { STATUSBAR_BG };
+                let base = if y == STATUSBAR_HEIGHT - 1 {
+                    0x1a1a2e
+                } else {
+                    STATUSBAR_BG
+                };
                 // Blend bar over background
-                self.buf[(y * w + x) as usize] = blend_pixel(self.buf[(y * w + x) as usize], base, 0.85);
+                self.buf[(y * w + x) as usize] =
+                    blend_pixel(self.buf[(y * w + x) as usize], base, 0.85);
             }
         }
 
@@ -286,7 +304,14 @@ impl Renderer {
         let pulse = (tick as f32 * 0.05).sin() * 0.5 + 0.5;
         let dot_color = lerp_color(0x1a2a1a, ACCENT_GREEN, 0.4 + pulse * 0.6);
         self.fill_circle(dot_x, STATUSBAR_HEIGHT / 2, 4, dot_color);
-        self.draw_text("Agent Active", (dot_x + 9) as i32, 9, 10.0, TEXT_SECONDARY, false);
+        self.draw_text(
+            "Agent Active",
+            (dot_x + 9) as i32,
+            9,
+            10.0,
+            TEXT_SECONDARY,
+            false,
+        );
 
         // CPU mini-gauge in status bar
         let cpu_bar_x = w / 2 + 40;
@@ -397,7 +422,14 @@ impl Renderer {
         self.fill_rect(x, y + panel_h - 1, panel_w, 1, 0x2d2a4a);
         self.fill_rect(x, y, panel_w, 2, ACCENT_BLUE);
 
-        self.draw_text("AGENT PLAN", x as i32 + 8, y as i32 + 6, 9.0, TEXT_DIM, true);
+        self.draw_text(
+            "AGENT PLAN",
+            x as i32 + 8,
+            y as i32 + 6,
+            9.0,
+            TEXT_DIM,
+            true,
+        );
         self.fill_rect(x, y + header_h - 1, panel_w, 1, 0x1a1a2e);
 
         let steps = self.plan_steps.clone();
@@ -444,7 +476,9 @@ impl Renderer {
 
         for (i, card) in cards.iter().enumerate() {
             let y = start_y + i as u32 * (card_h + 12);
-            if y + card_h > self.height { break; }
+            if y + card_h > self.height {
+                break;
+            }
 
             // Slide-in animation
             let slide_progress = (card.age_ticks as f32 / 20.0).min(1.0);
@@ -457,7 +491,9 @@ impl Renderer {
             } else {
                 1.0
             };
-            if fade <= 0.0 { continue; }
+            if fade <= 0.0 {
+                continue;
+            }
 
             let (bg, accent) = match card.card_type {
                 CardType::Info => (CARD_BG_INFO, ACCENT_PURPLE),
@@ -488,7 +524,14 @@ impl Renderer {
             self.fill_circle(x + card_w - 14, y + 14, 5, blend(accent, 0x000000, 0.3));
 
             // Title
-            self.draw_text(&card.title, (x + 14) as i32, (y + 14) as i32, 12.5, blend(TEXT_PRIMARY, 0x000000, 1.0 - fade), true);
+            self.draw_text(
+                &card.title,
+                (x + 14) as i32,
+                (y + 14) as i32,
+                12.5,
+                blend(TEXT_PRIMARY, 0x000000, 1.0 - fade),
+                true,
+            );
 
             // Body text (word-wrap, 3 lines)
             let body_lines = wrap_text(&card.body, 38);
@@ -506,7 +549,13 @@ impl Renderer {
             // Progress bar
             let progress = 1.0 - (card.age_ticks as f32 / card.max_age as f32);
             let bar_w = ((card_w - 6) as f32 * progress) as u32;
-            self.fill_rect(x + 3, y + card_h - 3, bar_w, 2, blend(accent, 0x000000, 0.25));
+            self.fill_rect(
+                x + 3,
+                y + card_h - 3,
+                bar_w,
+                2,
+                blend(accent, 0x000000, 0.25),
+            );
         }
     }
 
@@ -516,7 +565,9 @@ impl Renderer {
         let size: u32 = 96;
         let margin: u32 = 20;
         let x = margin;
-        let y = self.height.saturating_sub(size + margin * 2 + STATUSBAR_HEIGHT + 16);
+        let y = self
+            .height
+            .saturating_sub(size + margin * 2 + STATUSBAR_HEIGHT + 16);
 
         let (blink, pulse, emotion) = avatar.render_state(tick);
 
@@ -567,7 +618,8 @@ impl Renderer {
                 for i in 0..3u32 {
                     let phase = (tick as f32 * 0.18 + i as f32 * 1.1).sin();
                     let dot_y = (y + size / 2 + 14) as i32 - (phase * 4.0) as i32;
-                    let dot_color = lerp_color(AVATAR_FACE, ACCENT_AMBER, (phase * 0.5 + 0.5) as f32);
+                    let dot_color =
+                        lerp_color(AVATAR_FACE, ACCENT_AMBER, (phase * 0.5 + 0.5) as f32);
                     let dx = x + size / 2 - 8 + i * 9;
                     self.fill_circle(dx, dot_y as u32, 3, dot_color);
                 }
@@ -586,7 +638,12 @@ impl Renderer {
                 self.fill_circle(sx + sw / 2, sy + 2, 3, eye_color);
                 // Cheek blush
                 self.fill_circle(left_x - 4, eye_y + 10, 4, blend(0xff6b6b, AVATAR_FACE, 0.6));
-                self.fill_circle(right_x + 4, eye_y + 10, 4, blend(0xff6b6b, AVATAR_FACE, 0.6));
+                self.fill_circle(
+                    right_x + 4,
+                    eye_y + 10,
+                    4,
+                    blend(0xff6b6b, AVATAR_FACE, 0.6),
+                );
             }
             crate::avatar::Emotion::Alert => {
                 // Straight/flat concerned mouth + brow lines
@@ -648,7 +705,11 @@ impl Renderer {
 
     fn tick_waveform(&mut self, avatar: &Avatar, tick: u64) {
         let (_, _, emotion) = avatar.render_state(tick);
-        let target_amp = if emotion == crate::avatar::Emotion::Speaking { 1.0 } else { 0.0 };
+        let target_amp = if emotion == crate::avatar::Emotion::Speaking {
+            1.0
+        } else {
+            0.0
+        };
         let n = self.waveform.len();
         for i in 0..n {
             let phase = tick as f32 * 0.3 + i as f32 * 0.7;
@@ -661,7 +722,9 @@ impl Renderer {
 
     fn draw_boot_overlay(&mut self, tick: u64) {
         let alpha = 1.0 - (tick as f32 / 120.0).min(1.0);
-        if alpha <= 0.01 { return; }
+        if alpha <= 0.01 {
+            return;
+        }
 
         // Dim overlay
         for px in self.buf.iter_mut() {
@@ -681,11 +744,20 @@ impl Renderer {
         self.draw_text("ZUUPOS OS", cx, cy, 36.0, logo_color, true);
 
         let sub_color = blend(BG_BASE, TEXT_SECONDARY, alpha * 0.7);
-        self.draw_text("AI-Native Agentic Operating System", cx - 20, cy + 50, 13.5, sub_color, false);
+        self.draw_text(
+            "AI-Native Agentic Operating System",
+            cx - 20,
+            cy + 50,
+            13.5,
+            sub_color,
+            false,
+        );
 
         // Loading dots animated
         let dots_done = (tick / 25) % 6;
-        let dot_str: String = (0..5).map(|i| if i < dots_done { '●' } else { '○' }).collect();
+        let dot_str: String = (0..5)
+            .map(|i| if i < dots_done { '●' } else { '○' })
+            .collect();
         let dots_color = blend(BG_BASE, ACCENT_PURPLE, alpha * 0.7);
         self.draw_text(&dot_str, cx + 60, cy + 76, 13.0, dots_color, false);
     }
@@ -695,7 +767,9 @@ impl Renderer {
     fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
         let x2 = (x + w).min(self.width);
         let y2 = (y + h).min(self.height);
-        if x >= self.width || y >= self.height { return; }
+        if x >= self.width || y >= self.height {
+            return;
+        }
         for py in y..y2 {
             for px in x..x2 {
                 self.buf[(py * self.width + px) as usize] = color & 0x00ff_ffff;
@@ -704,7 +778,9 @@ impl Renderer {
     }
 
     fn fill_circle(&mut self, cx: u32, cy: u32, r: u32, color: u32) {
-        if r == 0 { return; }
+        if r == 0 {
+            return;
+        }
         let x0 = cx.saturating_sub(r);
         let x1 = (cx + r).min(self.width.saturating_sub(1));
         let y0 = cy.saturating_sub(r);
@@ -732,7 +808,9 @@ impl Renderer {
             let bx = cursor_x + metrics.xmin;
             let by = y + (size as i32) - metrics.ymin - metrics.height as i32;
             for (i, &cov) in bitmap.iter().enumerate() {
-                if cov == 0 { continue; }
+                if cov == 0 {
+                    continue;
+                }
                 let px = bx + (i % metrics.width) as i32;
                 let py = by + (i / metrics.width) as i32;
                 if px < 0 || py < 0 || px >= self.width as i32 || py >= self.height as i32 {
@@ -747,9 +825,8 @@ impl Renderer {
                 let fr = (r * alpha + br * (1.0 - alpha)).min(1.0);
                 let fg = (g * alpha + bg_g * (1.0 - alpha)).min(1.0);
                 let fb = (b * alpha + bb * (1.0 - alpha)).min(1.0);
-                self.buf[idx] = ((fr * 255.0) as u32) << 16
-                    | ((fg * 255.0) as u32) << 8
-                    | (fb * 255.0) as u32;
+                self.buf[idx] =
+                    ((fr * 255.0) as u32) << 16 | ((fg * 255.0) as u32) << 8 | (fb * 255.0) as u32;
             }
             cursor_x += metrics.advance_width as i32;
         }

@@ -21,5 +21,9 @@ pub fn init() {
     unsafe { data_port.write(divisor_low) };
     unsafe { data_port.write(divisor_high) };
 
-    log::info!("[pit] PIT initialized at {} Hz (divisor={})", TIMER_FREQUENCY, divisor);
+    log::info!(
+        "[pit] PIT initialized at {} Hz (divisor={})",
+        TIMER_FREQUENCY,
+        divisor
+    );
 }

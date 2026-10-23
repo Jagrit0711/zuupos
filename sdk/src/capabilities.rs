@@ -171,7 +171,10 @@ impl CapabilitySet {
     }
 
     pub fn to_tokens(&self) -> Vec<Capability> {
-        self.capabilities.iter().map(|c| Capability(c.to_id())).collect()
+        self.capabilities
+            .iter()
+            .map(|c| Capability(c.to_id()))
+            .collect()
     }
 
     pub fn from_tokens(tokens: &[Capability]) -> Self {

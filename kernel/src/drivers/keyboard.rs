@@ -1,8 +1,8 @@
 //! PS/2 keyboard scancode handler.
 //! Scancodes are sent to the agent event queue.
 
-use spinning_top::Spinlock;
 use alloc::collections::VecDeque;
+use spinning_top::Spinlock;
 
 static SCANCODE_QUEUE: Spinlock<VecDeque<u8>> = Spinlock::new(VecDeque::new());
 
