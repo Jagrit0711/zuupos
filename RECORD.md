@@ -16,7 +16,7 @@
 | Oct 22 2026 | Live Ollama LLM integration (`llama3.2:latest`) with autonomous fallback | ✅ | `pending` |
 | Oct 22 2026 | Embedded typography with fontdue + Inter fonts | ✅ | `pending` |
 | Oct 22 2026 | Reactive Avatar with 5 emotion states & blink animations | ✅ | `pending` |
-| Oct 22 2026 | UEFI bootloader verified with `x86_64-unknown-uefi` target | ✅ | `pending` |
+| Oct 22 2026 | UEFI bootloader verified with `x86_64-unknown-uefi` target | ✅ | `db36e6a` |
 | Oct 22 2026 | Kernel GDT/IDT/interrupts & bare-metal build (`x86_64-unknown-none`) | ✅ | `pending` |
 | Oct 22 2026 | Release binaries built (`zuupos-boot.efi` + `zuupos-kernel` ELF) | ✅ | `pending` |
 | Oct 22 2026 | Host demo launcher (`tools/run-demo.sh`) verified working end-to-end | ✅ | `3518437` |
@@ -37,6 +37,7 @@
 | Oct 23 2026 | **SDK: ToolRegistry with JSON Schema & FunctionTool** | ✅ | `pending` |
 | Oct 23 2026 | **SDK: Card/Widget primitives, ShellMessage IPC, Emotion enum** | ✅ | `pending` |
 | Oct 23 2026 | **Shell: winit 0.30 ApplicationHandler migration** | ✅ | `pending` |
+| Oct 23 2026 | **Bootloader: Fixed for uefi 0.33 API** (MemoryType, AllocateType, cstr16, with_config_table) | ✅ | `db36e6a` |
 | Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
 | Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | in progress |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | ✅ | - |
