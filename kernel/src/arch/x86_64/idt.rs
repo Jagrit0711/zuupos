@@ -159,6 +159,12 @@ pub extern "C" fn syscall_handler_inline(regs: &mut SyscallRegs) {
             crate::drivers::framebuffer::put_pixel(arg0 as u32, arg1 as u32, arg2 as u32);
             0
         }
+        9 => { // SYS_IPC_SEND
+            syscall_ipc_send(arg0, arg1, arg2)
+        }
+        10 => { // SYS_IPC_RECV
+            syscall_ipc_recv(arg0, arg1, arg2)
+        }
         _ => {
             log::warn!("[syscall] Unknown syscall: {}", syscall_num);
             u64::MAX
@@ -178,4 +184,15 @@ fn syscall_write(fd: u64, buf: u64, len: u64) -> u64 {
         unsafe { serial.write(byte); }
     }
     len
+}
+
+fn syscall_ipc_send(channel_id: u64, msg_ptr: u64, msg_len: u64) -> u64 {
+    // TODO: Implement IPC send
+    // For now, return success
+    0
+}
+
+fn syscall_ipc_recv(channel_id: u64, buf_ptr: u64, buf_len: u64) -> u64 {
+    // TODO: Implement IPC recv
+    0
 }
