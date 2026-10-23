@@ -1,12 +1,15 @@
 //! ZuuposOS Agentic Runtime Daemon (agentd)
 //!
 //! This is PID 1 of ZuuposOS — the AI agent that *is* the OS.
-//! It runs the core PERCEIVE → REASON → ACT → REFLECT loop.
+//! It runs the 5-stage PERCEIVE → REASON → PLAN → ACT → REFLECT loop,
+//! backed by real system sensors, a SQLite memory store, and Ollama LLM.
 
 mod agent;
 mod context;
 mod ipc;
 mod llm;
+mod planner;
+mod sensors;
 mod tools;
 mod voice;
 
@@ -19,22 +22,23 @@ async fn main() {
         .format_timestamp_millis()
         .init();
 
-    info!("╔══════════════════════════════════════════════╗");
-    info!("║        ZuuposOS Agentic Runtime v0.1         ║");
-    info!("║  PERCEIVE → REASON → ACT → REFLECT → loop   ║");
-    info!("╚══════════════════════════════════════════════╝");
+    info!("╔══════════════════════════════════════════════════════╗");
+    info!("║          ZuuposOS Agentic Runtime Daemon v0.2        ║");
+    info!("║   PERCEIVE → REASON → PLAN → ACT → REFLECT → loop   ║");
+    info!("║   Sensors: sysinfo | Memory: SQLite | LLM: Ollama    ║");
+    info!("╚══════════════════════════════════════════════════════╝");
 
     let config = AgentConfig {
         model_path: std::env::var("ZUUPOS_MODEL_PATH")
             .unwrap_or_else(|_| "models/phi-4-mini.gguf".to_string()),
         system_prompt: include_str!("agent/system_prompt.txt").to_string(),
-        max_tokens: 2048,
-        temperature: 0.7,
-        context_window: 8192,
+        max_tokens: 512,
+        temperature: 0.65,
+        context_window: 50,
     };
 
     let mut agent = Agent::new(config).await;
-    info!("[agentd] Agent initialized. Starting main loop...");
+    info!("[agentd] Agent initialized — starting proactive loop...");
 
     agent.run().await;
 }

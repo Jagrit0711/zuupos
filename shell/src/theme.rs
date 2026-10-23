@@ -1,4 +1,5 @@
 //! Theme constants — ZuuposOS dark palette.
+#![allow(dead_code)]
 
 // Background layers
 pub const BG_BASE: u32 = 0x050508;          // Near-black deep navy

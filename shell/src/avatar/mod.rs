@@ -13,6 +13,7 @@ pub enum Emotion {
     Speaking,
     Alert,
     Happy,
+    Processing,
 }
 
 pub struct Avatar {
@@ -68,12 +69,14 @@ impl Avatar {
             Emotion::Speaking => 0.12,
             Emotion::Alert => 0.18,
             Emotion::Happy => 0.05,
+            Emotion::Processing => 0.10,
         };
         let pulse = (tick as f32 * freq).sin() * 0.5 + 0.5;
 
         (is_blinking, pulse, self.emotion)
     }
 
+    #[allow(dead_code)]
     pub fn emotion(&self) -> Emotion {
         self.emotion
     }

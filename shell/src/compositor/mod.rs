@@ -116,6 +116,30 @@ pub fn run_shell() {
                                         ShellEvent::StatusUpdate(text) => {
                                             log::debug!("[ipc] Status: {}", text);
                                         }
+                                        ShellEvent::Metrics(metrics) => {
+                                            renderer.metrics = Some(metrics);
+                                        }
+                                        ShellEvent::TaskPlan(steps) => {
+                                            renderer.plan_steps = steps;
+                                        }
+                                        ShellEvent::DockUpdate(_entry) => {
+                                            log::debug!("[ipc] Dock update received");
+                                        }
+                                        ShellEvent::Notification { title, body, urgency: _ } => {
+                                            card_manager.add_card(Card {
+                                                title,
+                                                body,
+                                                card_type: CardType::Alert,
+                                                max_age: 350,
+                                                ..Default::default()
+                                            });
+                                        }
+                                        ShellEvent::BootStarted => {
+                                            boot_phase = BootPhase::Splash;
+                                        }
+                                        ShellEvent::AgentReady => {
+                                            boot_phase = BootPhase::Running;
+                                        }
                                     }
                                 }
                             }

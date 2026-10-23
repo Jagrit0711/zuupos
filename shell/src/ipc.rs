@@ -1,4 +1,7 @@
 //! IPC receiver for shell — receives messages from agentd.
+//!
+//! The shell listens on a Unix domain socket and deserializes ShellEvent
+//! messages sent by agentd. Events are queued for the render loop to consume.
 
 use crate::avatar::Emotion;
 use crate::cards::Card;
@@ -11,12 +14,55 @@ use std::sync::{Arc, Mutex};
 
 pub const DEFAULT_SOCKET_PATH: &str = "/tmp/zuupos_shell.sock";
 
+// ─── Shared IPC types (mirrors agentd/src/ipc.rs) ────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMetrics {
+    pub cpu_usage: f32,
+    pub mem_used_mb: u64,
+    pub mem_total_mb: u64,
+    pub battery_pct: Option<f32>,
+    pub load_avg_1m: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub index: u32,
+    pub description: String,
+    pub status: StepStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StepStatus {
+    Pending,
+    Active,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DockEntry {
+    pub id: String,
+    pub label: String,
+    pub icon_char: char,
+    pub active: bool,
+    pub pulse: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ShellEvent {
     Card(Card),
     AvatarEmotion(Emotion),
     StatusUpdate(String),
+    Metrics(SystemMetrics),
+    TaskPlan(Vec<PlanStep>),
+    DockUpdate(DockEntry),
+    Notification { title: String, body: String, urgency: u8 },
+    BootStarted,
+    AgentReady,
 }
+
+// ─── IPC Receiver ─────────────────────────────────────────────────────────────
 
 pub struct IpcReceiver {
     socket_path: String,
@@ -39,11 +85,11 @@ impl IpcReceiver {
 
         let listener = match UnixListener::bind(path) {
             Ok(l) => {
-                info!("[ipc] Listening on {}", self.socket_path);
+                info!("[ipc] Shell socket listening on {}", self.socket_path);
                 l
             }
             Err(e) => {
-                error!("[ipc] Failed to bind Unix socket at {}: {}", self.socket_path, e);
+                error!("[ipc] Failed to bind Unix socket: {}", e);
                 return;
             }
         };
@@ -52,13 +98,9 @@ impl IpcReceiver {
             match stream {
                 Ok(stream) => {
                     let queue = self.queue.clone();
-                    std::thread::spawn(move || {
-                        handle_client(stream, queue);
-                    });
+                    std::thread::spawn(move || handle_client(stream, queue));
                 }
-                Err(e) => {
-                    warn!("[ipc] Accept error: {}", e);
-                }
+                Err(e) => warn!("[ipc] Accept error: {}", e),
             }
         }
     }
@@ -80,11 +122,10 @@ fn handle_client(stream: UnixStream, queue: Arc<Mutex<Vec<ShellEvent>>>) {
                 }
                 match serde_json::from_str::<ShellEvent>(trimmed) {
                     Ok(event) => {
-                        let mut q = queue.lock().unwrap();
-                        q.push(event);
+                        queue.lock().unwrap().push(event);
                     }
                     Err(e) => {
-                        warn!("[ipc] JSON parse error: {} on line: {}", e, trimmed);
+                        warn!("[ipc] Parse error: {} | line: {}", e, &trimmed[..trimmed.len().min(60)]);
                     }
                 }
             }

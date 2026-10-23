@@ -154,10 +154,13 @@ The OS maintains a long-horizon memory:
 | **1.3** | Kernel: Memory management (VMM/PMM) | 🔴 TODO |
 | **1.4** | Kernel: Drivers & GOP framebuffer output | 🔴 TODO |
 | **1.5** | Agentd: ReAct loop + live Ollama (`llama3.2:latest`) & candle runtime | ✅ Working |
-| **1.6** | Agentd: Tool registry (cards, commands, reminders, audio) | ✅ Working |
-| **1.7** | Shell: Softbuffer compositor + avatar emotion + fontdue Inter | ✅ Working |
-| **1.8** | IPC: Unix domain socket bridge (`/tmp/zuupos_shell.sock`) | ✅ Working |
-| **1.9** | Host Demo: Full end-to-end macOS agentic OS preview | ✅ Working |
+| **1.6** | Agentd: Multi-step Task Planner (`agentd/src/planner/`) | ✅ Working |
+| **1.7** | Agentd: Hardware Telemetry Sensors (`agentd/src/sensors/`) | ✅ Working |
+| **1.8** | Agentd: Persistent SQLite memory & pattern learning (`agentd/src/context/`) | ✅ Working |
+| **1.9** | Shell: Softbuffer compositor + avatar emotion + fontdue Inter | ✅ Working |
+| **1.10** | Shell: Live CPU/RAM HUD + animated multi-step Task Plan panel | ✅ Working |
+| **1.11** | IPC: Unix domain socket bridge (`/tmp/zuupos_shell.sock`) | ✅ Working |
+| **1.12** | Host Demo: Full end-to-end macOS agentic OS preview | ✅ Working |
 
 ---
 

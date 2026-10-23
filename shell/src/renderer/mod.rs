@@ -1,20 +1,42 @@
-//! Software renderer — CPU pixel pipeline.
+//! Software renderer — CPU pixel pipeline for ZuuposOS shell.
 //!
-//! Renders directly to a softbuffer framebuffer:
-//!   Layer 0: Animated background (noise + gradient)
-//!   Layer 1: Status bar (top, 32px)
-//!   Layer 2: Floating cards (right side, AI-decided)
-//!   Layer 3: Avatar face (bottom-left)
-//!   Layer 4: Boot splash overlay (fade out)
+//! Layer stack (bottom → top):
+//!   0. Animated background  — 3-center radial gradient + noise + drift
+//!   1. Particle field        — floating ambient particles
+//!   2. Status bar            — 32px top bar with time, brand, metrics
+//!   3. Metrics HUD           — CPU/Mem gauges (bottom-right)
+//!   4. Task plan panel       — active plan steps (left side, animated)
+//!   5. Floating cards        — glassmorphism cards (right side)
+//!   6. Avatar face           — animated AI face (bottom-left)
+//!   7. Boot splash overlay   — fades out after boot
 
 use crate::avatar::Avatar;
 use crate::cards::{Card, CardType};
+use crate::ipc::{PlanStep, StepStatus, SystemMetrics};
 use crate::theme::*;
 use fontdue::{Font, FontSettings};
+use rand::{Rng, SeedableRng};
+use rand::rngs::SmallRng;
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use winit::window::Window;
+
+// ─── Particle ─────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct Particle {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+    life: f32,   // 0..1, fades out
+    max_life: f32,
+    size: f32,
+    color: u32,
+}
+
+// ─── Renderer ────────────────────────────────────────────────────────────────
 
 pub struct Renderer {
     surface: Surface<Arc<Window>, Arc<Window>>,
@@ -23,7 +45,18 @@ pub struct Renderer {
     buf: Vec<u32>,
     font: Font,
     font_bold: Font,
-    noise: Vec<u8>, // pre-baked noise texture
+    noise: Vec<u8>,
+    particles: Vec<Particle>,
+    rng: SmallRng,
+    /// Smoothed metrics for display (exponential moving average)
+    smooth_cpu: f32,
+    smooth_mem_pct: f32,
+    /// Active plan steps from agent
+    pub plan_steps: Vec<PlanStep>,
+    /// Latest system metrics
+    pub metrics: Option<SystemMetrics>,
+    /// Waveform buffer for Speaking animation (32 samples)
+    waveform: Vec<f32>,
 }
 
 impl Renderer {
@@ -31,43 +64,50 @@ impl Renderer {
         let ctx = Context::new(window.clone()).expect("softbuffer context failed");
         let surface = Surface::new(&ctx, window).expect("softbuffer surface failed");
 
-        // Load system fonts (embedded as bytes for portability)
+        // Embedded TrueType fonts
         let font_bytes = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
         let bold_bytes = include_bytes!("../../../assets/fonts/Inter-Bold.ttf");
 
-        let font = Font::from_bytes(
-            font_bytes.as_ref(),
-            FontSettings::default(),
-        )
-        .expect("Failed to load Inter Regular");
+        let font = Font::from_bytes(font_bytes.as_ref(), FontSettings::default())
+            .expect("Inter Regular load failed");
+        let font_bold = Font::from_bytes(bold_bytes.as_ref(), FontSettings::default())
+            .expect("Inter Bold load failed");
 
-        let font_bold = Font::from_bytes(
-            bold_bytes.as_ref(),
-            FontSettings::default(),
-        )
-        .expect("Failed to load Inter Bold");
-
-        // Pre-bake a noise texture for background variation
+        // Pre-bake deterministic noise texture (512×512)
         let noise: Vec<u8> = (0..512 * 512)
             .map(|i: usize| {
                 let x = i % 512;
                 let y = i / 512;
-                // Cheap deterministic hash noise
                 let h = (x.wrapping_mul(1619) ^ y.wrapping_mul(31337)).wrapping_mul(0x45d9f3b);
                 (h >> 24) as u8
             })
             .collect();
 
-        let buf = vec![0u32; (width * height) as usize];
+        let mut rng = SmallRng::seed_from_u64(0xdeadbeef);
+
+        // Pre-seed particle field
+        let particles: Vec<Particle> = (0..80)
+            .map(|_| spawn_particle(&mut rng, width, height, true))
+            .collect();
+
+        // Initial waveform (flat)
+        let waveform = vec![0.0f32; 32];
 
         Self {
             surface,
             width,
             height,
-            buf,
+            buf: vec![0u32; (width * height) as usize],
             font,
             font_bold,
             noise,
+            particles,
+            rng,
+            smooth_cpu: 0.0,
+            smooth_mem_pct: 0.0,
+            plan_steps: Vec::new(),
+            metrics: None,
+            waveform,
         }
     }
 
@@ -78,8 +118,24 @@ impl Renderer {
     }
 
     pub fn render(&mut self, tick: u64, cards: &[&Card], avatar: &Avatar, in_boot: bool) {
+        // Update smooth metrics
+        if let Some(m) = &self.metrics.clone() {
+            let alpha = 0.08;
+            self.smooth_cpu = self.smooth_cpu * (1.0 - alpha) + m.cpu_usage * alpha;
+            let mem_pct = m.mem_used_mb as f32 / m.mem_total_mb.max(1) as f32;
+            self.smooth_mem_pct = self.smooth_mem_pct * (1.0 - alpha) + mem_pct * alpha;
+        }
+
+        // Update waveform
+        self.tick_waveform(avatar, tick);
+
+        // Draw layers
         self.draw_background(tick);
+        self.update_particles(tick);
+        self.draw_particles();
         self.draw_statusbar(tick);
+        self.draw_metrics_hud(tick);
+        self.draw_plan_panel(tick);
         self.draw_cards(cards, tick);
         self.draw_avatar(avatar, tick);
 
@@ -90,42 +146,44 @@ impl Renderer {
         self.present();
     }
 
-    // ── Background ──────────────────────────────────────────────────────────
+    // ── Background ───────────────────────────────────────────────────────────
 
     fn draw_background(&mut self, tick: u64) {
         let w = self.width;
         let h = self.height;
-        let t = tick as f32 * 0.008;
+        let t = tick as f32 * 0.006;
 
-        // Two animated radial gradient centers
-        let cx1 = (0.3 + (t * 0.7).sin() * 0.15) * w as f32;
-        let cy1 = (0.4 + (t * 0.5).cos() * 0.1) * h as f32;
-        let cx2 = (0.7 + (t * 0.4).cos() * 0.12) * w as f32;
-        let cy2 = (0.6 + (t * 0.6).sin() * 0.1) * h as f32;
+        // Three animated radial gradient centers
+        let cx1 = (0.25 + (t * 0.7).sin() * 0.12) * w as f32;
+        let cy1 = (0.35 + (t * 0.5).cos() * 0.10) * h as f32;
+
+        let cx2 = (0.72 + (t * 0.4).cos() * 0.10) * w as f32;
+        let cy2 = (0.65 + (t * 0.6).sin() * 0.10) * h as f32;
+
+        let cx3 = (0.50 + (t * 0.3).sin() * 0.08) * w as f32;
+        let cy3 = (0.20 + (t * 0.8).cos() * 0.08) * h as f32;
 
         for y in 0..h {
             for x in 0..w {
-                let dx1 = (x as f32 - cx1) / w as f32;
-                let dy1 = (y as f32 - cy1) / h as f32;
-                let d1 = (dx1 * dx1 + dy1 * dy1).sqrt().min(1.0);
+                let fx = x as f32;
+                let fy = y as f32;
 
-                let dx2 = (x as f32 - cx2) / w as f32;
-                let dy2 = (y as f32 - cy2) / h as f32;
-                let d2 = (dx2 * dx2 + dy2 * dy2).sqrt().min(1.0);
+                let d1 = (((fx - cx1).powi(2) + (fy - cy1).powi(2)).sqrt() / w as f32).min(1.0);
+                let d2 = (((fx - cx2).powi(2) + (fy - cy2).powi(2)).sqrt() / w as f32).min(1.0);
+                let d3 = (((fx - cx3).powi(2) + (fy - cy3).powi(2)).sqrt() / w as f32).min(1.0);
 
-                // Purple haze from center 1
-                let p1 = ((1.0 - d1 * 2.5).max(0.0)).powf(2.5);
-                // Blue wash from center 2
-                let p2 = ((1.0 - d2 * 2.8).max(0.0)).powf(2.5);
+                let p1 = (1.0 - d1 * 2.2).max(0.0).powf(2.2); // violet center
+                let p2 = (1.0 - d2 * 2.5).max(0.0).powf(2.5); // indigo center
+                let p3 = (1.0 - d3 * 3.0).max(0.0).powf(3.0); // deep blue top
 
                 // Noise grain
                 let nx = (x % 512) as usize;
                 let ny = (y % 512) as usize;
-                let noise_val = self.noise[ny * 512 + nx] as f32 / 255.0 * 0.018;
+                let nv = self.noise[ny * 512 + nx] as f32 / 255.0 * 0.015;
 
-                let r = (0.02 + p1 * 0.18 + p2 * 0.04 + noise_val).min(1.0);
-                let g = (0.01 + p1 * 0.03 + p2 * 0.06 + noise_val * 0.5).min(1.0);
-                let b = (0.05 + p1 * 0.22 + p2 * 0.28 + noise_val).min(1.0);
+                let r = (0.018 + p1 * 0.20 + p2 * 0.03 + p3 * 0.02 + nv).min(1.0);
+                let g = (0.008 + p1 * 0.02 + p2 * 0.05 + p3 * 0.06 + nv * 0.4).min(1.0);
+                let b = (0.040 + p1 * 0.24 + p2 * 0.32 + p3 * 0.28 + nv).min(1.0);
 
                 let ir = (r * 255.0) as u32;
                 let ig = (g * 255.0) as u32;
@@ -135,222 +193,504 @@ impl Renderer {
         }
     }
 
+    // ── Particle System ──────────────────────────────────────────────────────
+
+    fn update_particles(&mut self, _tick: u64) {
+        let w = self.width;
+        let h = self.height;
+        let dead: Vec<usize> = self.particles
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.life <= 0.0)
+            .map(|(i, _)| i)
+            .collect();
+
+        for i in dead {
+            self.particles[i] = spawn_particle(&mut self.rng, w, h, false);
+        }
+
+        for p in &mut self.particles {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 1.0 / p.max_life;
+
+            // Wrap horizontally
+            if p.x < 0.0 { p.x += w as f32; }
+            if p.x >= w as f32 { p.x -= w as f32; }
+        }
+    }
+
+    fn draw_particles(&mut self) {
+        let w = self.width;
+        let h = self.height;
+        for p in &self.particles {
+            if p.life <= 0.0 { continue; }
+            let alpha = (p.life * 0.55).min(1.0);
+            let px = p.x as i32;
+            let py = p.y as i32;
+            if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 { continue; }
+            let idx = (py as u32 * w + px as u32) as usize;
+            if idx < self.buf.len() {
+                self.buf[idx] = blend_pixel(self.buf[idx], p.color, alpha * (p.size / 3.0).min(1.0));
+            }
+            // Draw a small soft dot (radius 1)
+            if p.size > 1.5 {
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        let nx = px + dx;
+                        let ny = py + dy;
+                        if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 { continue; }
+                        let ni = (ny as u32 * w + nx as u32) as usize;
+                        if ni < self.buf.len() {
+                            let dist_a = alpha * 0.35 * (1.0 - ((dx * dx + dy * dy) as f32).sqrt() * 0.5);
+                            self.buf[ni] = blend_pixel(self.buf[ni], p.color, dist_a.max(0.0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Status Bar ───────────────────────────────────────────────────────────
 
     fn draw_statusbar(&mut self, tick: u64) {
         let w = self.width;
-        // Fill bar
+        // Translucent bar background
         for x in 0..w {
             for y in 0..STATUSBAR_HEIGHT {
-                let alpha = if y == STATUSBAR_HEIGHT - 1 { 0x1a1a2e } else { STATUSBAR_BG };
-                self.buf[(y * w + x) as usize] = alpha;
+                let base = if y == STATUSBAR_HEIGHT - 1 { 0x1a1a2e } else { STATUSBAR_BG };
+                // Blend bar over background
+                self.buf[(y * w + x) as usize] = blend_pixel(self.buf[(y * w + x) as usize], base, 0.85);
             }
         }
 
-        // "ZUUPOS OS" brand text
-        self.draw_text("ZUUPOS OS", 16, 8, 11.0, ACCENT_PURPLE, false);
+        // Brand text
+        self.draw_text("ZUUPOS OS", 16, 9, 11.0, ACCENT_PURPLE, true);
 
-        // Time (right side)
+        // Separator
+        self.fill_rect(120, 10, 1, 12, 0x2d2a4a);
+
+        // Version tag
+        self.draw_text("v0.2-alpha", 128, 9, 9.5, TEXT_DIM, false);
+
+        // Time (right)
         let now = chrono::Local::now();
-        let time_str = now.format("%H:%M").to_string();
-        let tx = w as i32 - 60;
-        self.draw_text(&time_str, tx, 8, 11.0, TEXT_SECONDARY, false);
+        let time_str = now.format("%H:%M:%S").to_string();
+        let date_str = now.format("%d %b").to_string();
+        let tx = w as i32 - 130;
+        self.draw_text(&date_str, tx, 5, 9.0, TEXT_DIM, false);
+        self.draw_text(&time_str, tx + 50, 9, 11.0, TEXT_PRIMARY, false);
 
-        // Agent status indicator dot (pulsing)
-        let dot_x = w / 2;
+        // Agent pulsing dot
+        let dot_x = w / 2 - 50;
         let pulse = (tick as f32 * 0.05).sin() * 0.5 + 0.5;
-        let dot_brightness = 0.4 + pulse * 0.6;
-        let dot_color = lerp_color(0x1a3a1a, ACCENT_GREEN, dot_brightness);
+        let dot_color = lerp_color(0x1a2a1a, ACCENT_GREEN, 0.4 + pulse * 0.6);
         self.fill_circle(dot_x, STATUSBAR_HEIGHT / 2, 4, dot_color);
+        self.draw_text("Agent Active", (dot_x + 9) as i32, 9, 10.0, TEXT_SECONDARY, false);
 
-        // Status text next to dot
-        self.draw_text("Agent Active", (dot_x + 10) as i32, 8, 10.0, TEXT_SECONDARY, false);
+        // CPU mini-gauge in status bar
+        let cpu_bar_x = w / 2 + 40;
+        let cpu_pct = self.smooth_cpu / 100.0;
+        self.draw_text("CPU", cpu_bar_x as i32, 5, 8.5, TEXT_DIM, false);
+        self.fill_rect(cpu_bar_x + 28, 10, 50, 4, 0x1a1a2e);
+        let cpu_bar_w = (50.0 * cpu_pct) as u32;
+        let cpu_color = lerp_color(ACCENT_GREEN, ACCENT_RED, cpu_pct);
+        self.fill_rect(cpu_bar_x + 28, 10, cpu_bar_w, 4, cpu_color);
+    }
+
+    // ── Metrics HUD ──────────────────────────────────────────────────────────
+
+    fn draw_metrics_hud(&mut self, tick: u64) {
+        let panel_w: u32 = 150;
+        let panel_h: u32 = 88;
+        let margin: u32 = 16;
+        let x = self.width.saturating_sub(panel_w + margin);
+        let y = self.height.saturating_sub(panel_h + margin);
+
+        // Semi-transparent panel
+        for py in y..y + panel_h {
+            for px in x..x + panel_w {
+                if px < self.width && py < self.height {
+                    let idx = (py * self.width + px) as usize;
+                    self.buf[idx] = blend_pixel(self.buf[idx], 0x09090d, 0.78);
+                }
+            }
+        }
+
+        // Panel border
+        self.fill_rect(x, y, panel_w, 1, 0x2d2a4a);
+        self.fill_rect(x, y, 1, panel_h, 0x2d2a4a);
+        self.fill_rect(x + panel_w - 1, y, 1, panel_h, 0x2d2a4a);
+        self.fill_rect(x, y + panel_h - 1, panel_w, 1, 0x2d2a4a);
+        // Accent top line
+        self.fill_rect(x, y, panel_w, 2, ACCENT_PURPLE);
+
+        let xi = x as i32;
+        let yi = y as i32;
+        self.draw_text("SYSTEM", xi + 8, yi + 8, 8.5, TEXT_DIM, true);
+
+        // CPU gauge
+        self.draw_text("CPU", xi + 8, yi + 24, 9.0, TEXT_SECONDARY, false);
+        self.fill_rect(x + 36, y + 25, 90, 6, 0x1a1a2e);
+        let cpu_w = (90.0 * self.smooth_cpu / 100.0) as u32;
+        let cpu_c = lerp_color(ACCENT_GREEN, ACCENT_RED, self.smooth_cpu / 100.0);
+        self.fill_rect(x + 36, y + 25, cpu_w, 6, cpu_c);
+        let cpu_label = format!("{:.0}%", self.smooth_cpu);
+        self.draw_text(&cpu_label, xi + 130, yi + 24, 8.5, TEXT_PRIMARY, false);
+
+        // Memory gauge
+        self.draw_text("MEM", xi + 8, yi + 40, 9.0, TEXT_SECONDARY, false);
+        self.fill_rect(x + 36, y + 41, 90, 6, 0x1a1a2e);
+        let mem_w = (90.0 * self.smooth_mem_pct) as u32;
+        let mem_c = lerp_color(ACCENT_BLUE, ACCENT_AMBER, self.smooth_mem_pct);
+        self.fill_rect(x + 36, y + 41, mem_w, 6, mem_c);
+        let mem_label = format!("{:.0}%", self.smooth_mem_pct * 100.0);
+        self.draw_text(&mem_label, xi + 130, yi + 40, 8.5, TEXT_PRIMARY, false);
+
+        // Load average
+        if let Some(m) = &self.metrics.clone() {
+            let load_str = format!("Load  {:.2}", m.load_avg_1m);
+            self.draw_text(&load_str, xi + 8, yi + 58, 9.0, TEXT_SECONDARY, false);
+        }
+
+        // Pulsing dot (heartbeat)
+        let hb = (tick as f32 * 0.08).sin() * 0.5 + 0.5;
+        let hb_color = lerp_color(0x1a1a2e, ACCENT_GREEN, hb);
+        self.fill_circle(x + panel_w - 10, y + 8, 4, hb_color);
+
+        // Cycle count
+        let cycles_str = format!("Cycle #{}", tick / 60);
+        self.draw_text(&cycles_str, xi + 8, yi + 74, 8.0, TEXT_DIM, false);
+    }
+
+    // ── Task Plan Panel ───────────────────────────────────────────────────────
+
+    fn draw_plan_panel(&mut self, tick: u64) {
+        if self.plan_steps.is_empty() {
+            return;
+        }
+
+        let panel_w: u32 = 220;
+        let step_h: u32 = 26;
+        let header_h: u32 = 24;
+        let padding: u32 = 8;
+        let margin: u32 = 16;
+        let panel_h = header_h + self.plan_steps.len() as u32 * step_h + padding;
+
+        let x = margin;
+        let y = STATUSBAR_HEIGHT + margin;
+
+        // Background
+        for py in y..y + panel_h {
+            for px in x..x + panel_w {
+                if px < self.width && py < self.height {
+                    let idx = (py * self.width + px) as usize;
+                    self.buf[idx] = blend_pixel(self.buf[idx], 0x080814, 0.82);
+                }
+            }
+        }
+
+        // Border
+        self.fill_rect(x, y, panel_w, 1, 0x2d2a4a);
+        self.fill_rect(x, y, 1, panel_h, 0x2d2a4a);
+        self.fill_rect(x + panel_w - 1, y, 1, panel_h, 0x2d2a4a);
+        self.fill_rect(x, y + panel_h - 1, panel_w, 1, 0x2d2a4a);
+        self.fill_rect(x, y, panel_w, 2, ACCENT_BLUE);
+
+        self.draw_text("AGENT PLAN", x as i32 + 8, y as i32 + 6, 9.0, TEXT_DIM, true);
+        self.fill_rect(x, y + header_h - 1, panel_w, 1, 0x1a1a2e);
+
+        let steps = self.plan_steps.clone();
+        for (i, step) in steps.iter().enumerate() {
+            let sy = y + header_h + i as u32 * step_h;
+            let sy_i = sy as i32;
+
+            let (dot_color, text_color) = match step.status {
+                StepStatus::Pending => (TEXT_DIM, TEXT_DIM),
+                StepStatus::Active => {
+                    let pulse = (tick as f32 * 0.12).sin() * 0.5 + 0.5;
+                    (lerp_color(ACCENT_BLUE, ACCENT_CYAN, pulse), TEXT_PRIMARY)
+                }
+                StepStatus::Done => (ACCENT_GREEN, TEXT_SECONDARY),
+                StepStatus::Failed => (ACCENT_RED, 0xfca5a5),
+            };
+
+            let prefix = match step.status {
+                StepStatus::Pending => "○",
+                StepStatus::Active => "◉",
+                StepStatus::Done => "✓",
+                StepStatus::Failed => "✗",
+            };
+
+            self.fill_circle(x + 12, sy + step_h / 2, 3, dot_color);
+            let label = format!("{} {}", prefix, truncate_str(&step.description, 26));
+            self.draw_text(&label, x as i32 + 22, sy_i + 8, 8.5, text_color, false);
+
+            // Connector line between steps
+            if i + 1 < steps.len() {
+                self.fill_rect(x + 11, sy + step_h - 2, 2, 4, 0x2d2a4a);
+            }
+        }
     }
 
     // ── Cards ─────────────────────────────────────────────────────────────────
 
-    fn draw_cards(&mut self, cards: &[&Card], tick: u64) {
+    fn draw_cards(&mut self, cards: &[&Card], _tick: u64) {
         let card_w: u32 = 340;
-        let card_h: u32 = 110;
+        let card_h: u32 = 115;
         let margin: u32 = 16;
         let start_x = self.width.saturating_sub(card_w + margin);
         let start_y = STATUSBAR_HEIGHT + margin;
 
         for (i, card) in cards.iter().enumerate() {
-            let y = start_y + i as u32 * (card_h + 10);
+            let y = start_y + i as u32 * (card_h + 12);
             if y + card_h > self.height { break; }
 
-            // Slide-in animation: cards enter from right
-            let age = card.age_ticks;
-            let slide_progress = (age as f32 / 20.0).min(1.0);
-            let slide_offset = ((1.0 - ease_out_cubic(slide_progress)) * 60.0) as u32;
+            // Slide-in animation
+            let slide_progress = (card.age_ticks as f32 / 20.0).min(1.0);
+            let slide_offset = ((1.0 - ease_out_cubic(slide_progress)) * 70.0) as u32;
             let x = start_x + slide_offset;
 
             // Fade out near end of life
             let fade = if card.age_ticks > card.max_age.saturating_sub(60) {
-                1.0 - (card.age_ticks - card.max_age.saturating_sub(60)) as f32 / 60.0
+                (card.max_age.saturating_sub(card.age_ticks)) as f32 / 60.0
             } else {
                 1.0
             };
+            if fade <= 0.0 { continue; }
 
             let (bg, accent) = match card.card_type {
                 CardType::Info => (CARD_BG_INFO, ACCENT_PURPLE),
                 CardType::Task => (CARD_BG_TASK, ACCENT_BLUE),
                 CardType::Alert => (CARD_BG_ALERT, ACCENT_RED),
                 CardType::Weather => (CARD_BG_WEATHER, ACCENT_CYAN),
+                CardType::Metric => (0x060f18, ACCENT_AMBER),
+                CardType::Plan => (0x07100a, ACCENT_GREEN),
             };
 
-            // Card body
-            self.fill_rect(x, y, card_w, card_h, bg);
+            // Glassmorphism card body
+            for py in y..y + card_h {
+                for px in x..x + card_w {
+                    if px < self.width && py < self.height {
+                        let idx = (py * self.width + px) as usize;
+                        self.buf[idx] = blend_pixel(self.buf[idx], bg, 0.88 * fade);
+                    }
+                }
+            }
 
-            // Accent left border (3px)
-            self.fill_rect(x, y, 3, card_h, accent);
-
-            // Top highlight line
-            self.fill_rect(x + 3, y, card_w - 3, 1, blend(bg, 0xffffff, 0.08));
-
-            // Bottom shadow line
+            // Accent left border
+            self.fill_rect(x, y, 3, card_h, blend(accent, 0x000000, 1.0 - fade));
+            // Top highlight
+            self.fill_rect(x + 3, y, card_w - 3, 1, blend(bg, 0xffffff, 0.10));
+            // Bottom shadow
             self.fill_rect(x, y + card_h - 1, card_w, 1, 0x000000);
+            // Corner accent dot
+            self.fill_circle(x + card_w - 14, y + 14, 5, blend(accent, 0x000000, 0.3));
 
-            // Card type icon dot (top-right)
-            self.fill_circle(x + card_w - 14, y + 14, 5, accent);
+            // Title
+            self.draw_text(&card.title, (x + 14) as i32, (y + 14) as i32, 12.5, blend(TEXT_PRIMARY, 0x000000, 1.0 - fade), true);
 
-            // Title text
-            self.draw_text(&card.title, (x + 14) as i32, (y + 14) as i32, 12.0, TEXT_PRIMARY, true);
-
-            // Body text (word-wrapped, 2 lines max)
-            let body_lines = wrap_text(&card.body, 36);
+            // Body text (word-wrap, 3 lines)
+            let body_lines = wrap_text(&card.body, 38);
             for (li, line) in body_lines.iter().enumerate().take(3) {
                 self.draw_text(
                     line,
                     (x + 14) as i32,
                     (y + 34 + li as u32 * 18) as i32,
                     10.0,
-                    TEXT_SECONDARY,
+                    blend(TEXT_SECONDARY, 0x000000, 1.0 - fade),
                     false,
                 );
             }
 
-            // Age progress bar at bottom
+            // Progress bar
             let progress = 1.0 - (card.age_ticks as f32 / card.max_age as f32);
-            let bar_w = ((card_w - 3) as f32 * progress) as u32;
-            self.fill_rect(x + 3, y + card_h - 3, bar_w, 2, blend(accent, 0x000000, 0.3));
+            let bar_w = ((card_w - 6) as f32 * progress) as u32;
+            self.fill_rect(x + 3, y + card_h - 3, bar_w, 2, blend(accent, 0x000000, 0.25));
         }
     }
 
     // ── Avatar ───────────────────────────────────────────────────────────────
 
     fn draw_avatar(&mut self, avatar: &Avatar, tick: u64) {
-        let size: u32 = 90;
+        let size: u32 = 96;
         let margin: u32 = 20;
         let x = margin;
-        let y = self.height.saturating_sub(size + margin + STATUSBAR_HEIGHT);
+        let y = self.height.saturating_sub(size + margin * 2 + STATUSBAR_HEIGHT + 16);
 
         let (blink, pulse, emotion) = avatar.render_state(tick);
 
-        // Outer glow ring (pulsing)
-        let glow_r = size / 2 + 10;
-        let glow_intensity = pulse * 0.3;
-        let glow_color = lerp_color(BG_BASE, ACCENT_PURPLE, glow_intensity);
+        // Outer halo
+        let glow_r = size / 2 + 14;
+        let glow_color = lerp_color(BG_BASE, AVATAR_GLOW, pulse * 0.28);
         self.fill_circle(x + size / 2, y + size / 2, glow_r, glow_color);
 
-        // Second inner glow
-        let inner_glow = lerp_color(BG_BASE, AVATAR_GLOW, pulse * 0.5);
-        self.fill_circle(x + size / 2, y + size / 2, size / 2 + 4, inner_glow);
+        // Second ring
+        let inner_glow = lerp_color(BG_BASE, AVATAR_GLOW, pulse * 0.55);
+        self.fill_circle(x + size / 2, y + size / 2, size / 2 + 5, inner_glow);
 
-        // Avatar background circle
+        // Main circle
         self.fill_circle(x + size / 2, y + size / 2, size / 2, AVATAR_BG);
+        // Face plane
+        self.fill_circle(x + size / 2, y + size / 2, size / 2 - 5, AVATAR_FACE);
 
-        // Face circle (slightly lighter)
-        self.fill_circle(x + size / 2, y + size / 2, size / 2 - 4, AVATAR_FACE);
-
-        // Eyes
-        let eye_y_base = y + size / 2 - 10;
-        let left_eye_x = x + size / 2 - 14;
-        let right_eye_x = x + size / 2 + 14;
-
-        let eye_h = if blink { 1u32 } else { 7u32 };
-        let eye_w = 9u32;
-
-        // Emotion-based eye color
+        // Eye colors per emotion
         let eye_color = match emotion {
             crate::avatar::Emotion::Idle => AVATAR_EYE,
             crate::avatar::Emotion::Thinking => ACCENT_AMBER,
             crate::avatar::Emotion::Speaking => ACCENT_GREEN,
             crate::avatar::Emotion::Alert => ACCENT_RED,
             crate::avatar::Emotion::Happy => 0x34d399,
+            crate::avatar::Emotion::Processing => ACCENT_CYAN,
         };
 
-        // Left eye
+        let eye_y = y + size / 2 - 12;
+        let left_x = x + size / 2 - 15;
+        let right_x = x + size / 2 + 15;
+
+        // Eyes (blink = squish into line)
         if !blink {
-            self.fill_circle(left_eye_x, eye_y_base, eye_w / 2, eye_color);
+            self.fill_circle(left_x, eye_y, 5, eye_color);
+            self.fill_circle(right_x, eye_y, 5, eye_color);
+            // Pupils
+            self.fill_circle(left_x + 1, eye_y, 2, blend(eye_color, 0x000000, 0.5));
+            self.fill_circle(right_x + 1, eye_y, 2, blend(eye_color, 0x000000, 0.5));
         } else {
-            self.fill_rect(left_eye_x - eye_w / 2, eye_y_base, eye_w, 2, eye_color);
-        }
-        // Right eye
-        if !blink {
-            self.fill_circle(right_eye_x, eye_y_base, eye_w / 2, eye_color);
-        } else {
-            self.fill_rect(right_eye_x - eye_w / 2, eye_y_base, eye_w, 2, eye_color);
+            self.fill_rect(left_x - 5, eye_y, 10, 2, eye_color);
+            self.fill_rect(right_x - 5, eye_y, 10, 2, eye_color);
         }
 
-        // Thinking dots animation (when emotion = Thinking)
-        if emotion == crate::avatar::Emotion::Thinking {
-            for i in 0..3u32 {
-                let dot_phase = ((tick as f32 * 0.15 + i as f32 * 0.8).sin() * 0.5 + 0.5) as f32;
-                let dot_color = lerp_color(AVATAR_FACE, ACCENT_AMBER, dot_phase);
-                let dx = x + size / 2 - 8 + i * 8;
-                let dy = y + size / 2 + 12;
-                self.fill_circle(dx, dy, 3, dot_color);
+        // Emotion-specific face features
+        match emotion {
+            crate::avatar::Emotion::Thinking => {
+                // Animated bouncing dots
+                for i in 0..3u32 {
+                    let phase = (tick as f32 * 0.18 + i as f32 * 1.1).sin();
+                    let dot_y = (y + size / 2 + 14) as i32 - (phase * 4.0) as i32;
+                    let dot_color = lerp_color(AVATAR_FACE, ACCENT_AMBER, (phase * 0.5 + 0.5) as f32);
+                    let dx = x + size / 2 - 8 + i * 9;
+                    self.fill_circle(dx, dot_y as u32, 3, dot_color);
+                }
             }
-        } else {
-            // Normal smile
-            let smile_y = y + size / 2 + 12;
-            let smile_x = x + size / 2;
-            let smile_w = 20u32;
-            // Simple arc approximated as rectangle with rounded ends
-            self.fill_rect(smile_x - smile_w / 2, smile_y, smile_w, 3, eye_color);
-            self.fill_circle(smile_x - smile_w / 2, smile_y + 1, 2, eye_color);
-            self.fill_circle(smile_x + smile_w / 2, smile_y + 1, 2, eye_color);
+            crate::avatar::Emotion::Speaking => {
+                // Animated waveform mouth
+                self.draw_waveform_mouth(x, y, size, tick);
+            }
+            crate::avatar::Emotion::Happy => {
+                // Broad arc smile
+                let sy = y + size / 2 + 14;
+                let sw = 24u32;
+                let sx = x + size / 2;
+                self.fill_rect(sx - sw / 2, sy, sw, 3, eye_color);
+                self.fill_circle(sx - sw / 2, sy + 2, 3, eye_color);
+                self.fill_circle(sx + sw / 2, sy + 2, 3, eye_color);
+                // Cheek blush
+                self.fill_circle(left_x - 4, eye_y + 10, 4, blend(0xff6b6b, AVATAR_FACE, 0.6));
+                self.fill_circle(right_x + 4, eye_y + 10, 4, blend(0xff6b6b, AVATAR_FACE, 0.6));
+            }
+            crate::avatar::Emotion::Alert => {
+                // Straight/flat concerned mouth + brow lines
+                let my = y + size / 2 + 12;
+                let mw = 18u32;
+                let mx = x + size / 2;
+                self.fill_rect(mx - mw / 2, my, mw, 2, eye_color);
+                // Brow lines (angled)
+                self.fill_rect(left_x - 5, eye_y - 8, 10, 2, ACCENT_RED);
+                self.fill_rect(right_x - 5, eye_y - 8, 10, 2, ACCENT_RED);
+            }
+            _ => {
+                // Neutral slight smile
+                let sy = y + size / 2 + 14;
+                let sw = 20u32;
+                let sx = x + size / 2;
+                self.fill_rect(sx - sw / 2, sy, sw, 3, eye_color);
+                self.fill_circle(sx - sw / 2, sy + 1, 2, eye_color);
+                self.fill_circle(sx + sw / 2, sy + 1, 2, eye_color);
+            }
         }
 
-        // Avatar label
-        self.draw_text("ZuuposOS", (x) as i32, (y + size + 4) as i32, 9.0, TEXT_DIM, false);
+        // Emotion label ring around avatar
+        let emotion_str = match emotion {
+            crate::avatar::Emotion::Idle => "IDLE",
+            crate::avatar::Emotion::Thinking => "THINKING",
+            crate::avatar::Emotion::Speaking => "SPEAKING",
+            crate::avatar::Emotion::Alert => "ALERT",
+            crate::avatar::Emotion::Happy => "HAPPY",
+            crate::avatar::Emotion::Processing => "PROCESSING",
+        };
+        self.draw_text(
+            emotion_str,
+            (x + size / 2) as i32 - 24,
+            (y + size + 6) as i32,
+            8.0,
+            blend(eye_color, 0x000000, 0.2),
+            true,
+        );
     }
 
-    // ── Boot Overlay ─────────────────────────────────────────────────────────
+    fn draw_waveform_mouth(&mut self, ax: u32, ay: u32, size: u32, _tick: u64) {
+        let base_y = (ay + size / 2 + 14) as i32;
+        let base_x = (ax + size / 2) as i32;
+        let samples = self.waveform.len() as i32;
+        let wave_w = 28i32;
+
+        for i in 0..samples {
+            let t = i as f32 / samples as f32;
+            let px = base_x - wave_w / 2 + (t * wave_w as f32) as i32;
+            let amp = self.waveform[i as usize];
+            let py = base_y - (amp * 6.0) as i32;
+            let color = lerp_color(ACCENT_GREEN, ACCENT_CYAN, t);
+            if px >= 0 && py >= 0 && px < self.width as i32 && py < self.height as i32 {
+                self.fill_circle(px as u32, py as u32, 2, color);
+            }
+        }
+    }
+
+    fn tick_waveform(&mut self, avatar: &Avatar, tick: u64) {
+        let (_, _, emotion) = avatar.render_state(tick);
+        let target_amp = if emotion == crate::avatar::Emotion::Speaking { 1.0 } else { 0.0 };
+        let n = self.waveform.len();
+        for i in 0..n {
+            let phase = tick as f32 * 0.3 + i as f32 * 0.7;
+            let target = (phase.sin() * 0.7 + (phase * 1.3).cos() * 0.3) * target_amp;
+            self.waveform[i] = self.waveform[i] * 0.85 + target * 0.15;
+        }
+    }
+
+    // ── Boot Overlay ──────────────────────────────────────────────────────────
 
     fn draw_boot_overlay(&mut self, tick: u64) {
         let alpha = 1.0 - (tick as f32 / 120.0).min(1.0);
-        if alpha <= 0.0 { return; }
+        if alpha <= 0.01 { return; }
 
         // Dim overlay
-        let dim = (alpha * 220.0) as u32;
         for px in self.buf.iter_mut() {
-            let r = ((*px >> 16) & 0xff).min(dim >> 2);
-            let g = ((*px >> 8) & 0xff).min(dim >> 2);
-            let b = (*px & 0xff).min(dim >> 2);
-            *px = (r << 16) | (g << 8) | b;
+            let r = ((*px >> 16) & 0xff) as f32 / 255.0;
+            let g = ((*px >> 8) & 0xff) as f32 / 255.0;
+            let b = (*px & 0xff) as f32 / 255.0;
+            let dr = r * (1.0 - alpha * 0.9);
+            let dg = g * (1.0 - alpha * 0.9);
+            let db = b * (1.0 - alpha * 0.9);
+            *px = ((dr * 255.0) as u32) << 16 | ((dg * 255.0) as u32) << 8 | (db * 255.0) as u32;
         }
 
-        // Center logo text
-        let cx = (self.width / 2) as i32 - 70;
+        let cx = (self.width / 2) as i32 - 80;
         let cy = (self.height / 2) as i32 - 20;
-        let logo_alpha = (alpha * 255.0) as u8;
+
         let logo_color = blend(BG_BASE, ACCENT_PURPLE, alpha);
-        self.draw_text("ZUUPOS OS", cx, cy, 32.0, logo_color, true);
+        self.draw_text("ZUUPOS OS", cx, cy, 36.0, logo_color, true);
 
-        let sub_color = blend(BG_BASE, TEXT_SECONDARY, alpha * 0.8);
-        self.draw_text("AI-Native Agentic Operating System", cx - 30, cy + 44, 13.0, sub_color, false);
+        let sub_color = blend(BG_BASE, TEXT_SECONDARY, alpha * 0.7);
+        self.draw_text("AI-Native Agentic Operating System", cx - 20, cy + 50, 13.5, sub_color, false);
 
-        // Loading dots
-        let dots_done = (tick / 30) as usize;
-        let dot_str: String = (0..4).map(|i| if i < dots_done % 5 { '●' } else { '○' }).collect();
-        let dots_color = blend(BG_BASE, ACCENT_PURPLE, alpha * 0.6);
-        self.draw_text(&dot_str, cx + 50, cy + 70, 14.0, dots_color, false);
+        // Loading dots animated
+        let dots_done = (tick / 25) % 6;
+        let dot_str: String = (0..5).map(|i| if i < dots_done { '●' } else { '○' }).collect();
+        let dots_color = blend(BG_BASE, ACCENT_PURPLE, alpha * 0.7);
+        self.draw_text(&dot_str, cx + 60, cy + 76, 13.0, dots_color, false);
     }
 
-    // ── Primitive Drawing ─────────────────────────────────────────────────────
+    // ── Drawing Primitives ────────────────────────────────────────────────────
 
     fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
         let x2 = (x + w).min(self.width);
@@ -386,7 +726,6 @@ impl Renderer {
         let r = ((color >> 16) & 0xff) as f32 / 255.0;
         let g = ((color >> 8) & 0xff) as f32 / 255.0;
         let b = (color & 0xff) as f32 / 255.0;
-
         let mut cursor_x = x;
         for ch in text.chars() {
             let (metrics, bitmap) = font.rasterize(ch, size);
@@ -420,51 +759,105 @@ impl Renderer {
         let w = NonZeroU32::new(self.width).unwrap();
         let h = NonZeroU32::new(self.height).unwrap();
         self.surface.resize(w, h).unwrap();
-        let mut sbuf = self.surface.buffer_mut().unwrap();
-        sbuf.copy_from_slice(&self.buf);
-        sbuf.present().unwrap();
+        let mut frame = self.surface.buffer_mut().unwrap();
+        frame.copy_from_slice(&self.buf);
+        frame.present().unwrap();
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helper Functions ─────────────────────────────────────────────────────────
 
-fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
+fn spawn_particle(rng: &mut SmallRng, w: u32, h: u32, initial: bool) -> Particle {
+    let x = rng.gen_range(0.0..w as f32);
+    let y = if initial {
+        rng.gen_range(0.0..h as f32)
+    } else {
+        h as f32 // spawn from bottom edges
+    };
+    let speed = rng.gen_range(0.1f32..0.5);
+    let angle = rng.gen_range(std::f32::consts::PI * 1.2..std::f32::consts::PI * 1.8);
+    let max_life = rng.gen_range(180.0f32..600.0);
+    let size = rng.gen_range(0.8f32..3.0);
+    let hue = rng.gen_range(0u32..3);
+    let color = match hue {
+        0 => 0x7c3aed, // purple
+        1 => 0x2563eb, // blue
+        _ => 0x0891b2, // cyan
+    };
+    Particle {
+        x,
+        y,
+        vx: angle.cos() * speed,
+        vy: angle.sin() * speed * 0.4 - 0.25, // slight upward drift
+        life: 1.0,
+        max_life,
+        size,
+        color,
+    }
+}
+
+fn blend_pixel(bg: u32, fg: u32, alpha: f32) -> u32 {
+    let a = alpha.clamp(0.0, 1.0);
+    let br = ((bg >> 16) & 0xff) as f32;
+    let bg_g = ((bg >> 8) & 0xff) as f32;
+    let bb = (bg & 0xff) as f32;
+    let fr = ((fg >> 16) & 0xff) as f32;
+    let fg_g = ((fg >> 8) & 0xff) as f32;
+    let fb = (fg & 0xff) as f32;
+    let r = (fr * a + br * (1.0 - a)) as u32;
+    let g = (fg_g * a + bg_g * (1.0 - a)) as u32;
+    let b = (fb * a + bb * (1.0 - a)) as u32;
+    (r << 16) | (g << 8) | b
+}
+
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars - 1).collect();
+        format!("{}…", truncated)
+    }
+}
+
+pub fn ease_out_cubic(t: f32) -> f32 {
+    let t1 = 1.0 - t;
+    1.0 - t1 * t1 * t1
+}
+
+pub fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
     let t = t.clamp(0.0, 1.0);
-    let ar = ((a >> 16) & 0xff) as f32;
-    let ag = ((a >> 8) & 0xff) as f32;
-    let ab = (a & 0xff) as f32;
-    let br = ((b >> 16) & 0xff) as f32;
-    let bg_ = ((b >> 8) & 0xff) as f32;
-    let bb = (b & 0xff) as f32;
-    let r = (ar + (br - ar) * t) as u32;
-    let g = (ag + (bg_ - ag) * t) as u32;
-    let b_ = (ab + (bb - ab) * t) as u32;
-    (r << 16) | (g << 8) | b_
+    let ar = (a >> 16) & 0xff;
+    let ag = (a >> 8) & 0xff;
+    let ab = a & 0xff;
+    let br = (b >> 16) & 0xff;
+    let bg_g = (b >> 8) & 0xff;
+    let bb = b & 0xff;
+    let r = (ar as f32 + (br as f32 - ar as f32) * t) as u32;
+    let g = (ag as f32 + (bg_g as f32 - ag as f32) * t) as u32;
+    let bv = (ab as f32 + (bb as f32 - ab as f32) * t) as u32;
+    (r << 16) | (g << 8) | bv
 }
 
-fn blend(bg: u32, fg: u32, alpha: f32) -> u32 {
-    lerp_color(bg, fg, alpha)
+pub fn blend(a: u32, b: u32, alpha: f32) -> u32 {
+    lerp_color(b, a, alpha)
 }
 
-fn ease_out_cubic(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
-}
-
-fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
+pub fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = String::new();
     for word in text.split_whitespace() {
-        if current.len() + word.len() + 1 > max_chars {
-            if !current.is_empty() {
-                lines.push(current.trim().to_string());
-                current = String::new();
-            }
+        if current.is_empty() {
+            current = word.to_string();
+        } else if current.len() + 1 + word.len() <= max_chars {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(current.clone());
+            current = word.to_string();
         }
-        if !current.is_empty() { current.push(' '); }
-        current.push_str(word);
     }
     if !current.is_empty() {
-        lines.push(current.trim().to_string());
+        lines.push(current);
     }
     lines
 }

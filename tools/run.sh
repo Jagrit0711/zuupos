@@ -34,7 +34,7 @@ cd ..
 
 echo -e "${COLOR_CYAN}[*] Building kernel...${COLOR_RESET}"
 cd kernel
-cargo build --release --target x86_64-unknown-none
+cargo +nightly build --release --target x86_64-unknown-none
 cd ..
 
 echo -e "${COLOR_CYAN}[*] Creating UEFI disk image...${COLOR_RESET}"

@@ -9,6 +9,8 @@ pub enum CardType {
     Task,
     Alert,
     Weather,
+    Metric,
+    Plan,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

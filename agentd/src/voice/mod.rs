@@ -1,10 +1,12 @@
 //! Voice subsystem — STT via whisper.cpp FFI, TTS via espeak-ng or kokoro.
 //! Phase 1.8.
 
+#[allow(dead_code)]
 pub struct VoiceEngine {
     // whisper_ctx: WhisperContext,  // Phase 1.8
 }
 
+#[allow(dead_code)]
 impl VoiceEngine {
     pub fn init() -> Self {
         log::info!("[voice] Voice engine stub (Phase 1.8)");
