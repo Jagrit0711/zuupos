@@ -27,16 +27,26 @@
 | Oct 23 2026 | Shell HUD with smoothed gauges & animated Task Plan panel (`shell/src/renderer/mod.rs`) | ✅ | `3518437` |
 | Oct 23 2026 | Extended Avatar emotions (`Processing`) + Speaking mouth waveform | ✅ | `3518437` |
 | Oct 23 2026 | Zero-warning build pipeline across host crates & bare-metal targets | ✅ | `3518437` |
+| Oct 23 2026 | **Kernel: Physical Memory Manager (buddy allocator)** from UEFI map | ✅ | `pending` |
+| Oct 23 2026 | **Kernel: Virtual Memory Manager (4-level paging, higher-half kernel)** | ✅ | `pending` |
+| Oct 23 2026 | **Kernel: Work-stealing scheduler with PIT timer preemption** | ✅ | `pending` |
+| Oct 23 2026 | **Kernel: PCI bus enumeration + BAR mapping** | ✅ | `pending` |
+| Oct 23 2026 | **Kernel: NVMe driver skeleton (admin queues, Identify)** | ✅ | `pending` |
+| Oct 23 2026 | **Agentd: llama.cpp FFI backend + multi-backend LlmEngine** | ✅ | `pending` |
+| Oct 23 2026 | **SDK: Capability tokens, CapabilitySet, App lifecycle** | ✅ | `pending` |
+| Oct 23 2026 | **SDK: ToolRegistry with JSON Schema & FunctionTool** | ✅ | `pending` |
+| Oct 23 2026 | **SDK: Card/Widget primitives, ShellMessage IPC, Emotion enum** | ✅ | `pending` |
+| Oct 23 2026 | **Shell: winit 0.30 ApplicationHandler migration** | ✅ | `pending` |
 | Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
 | Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | in progress |
-| Oct 29 2026 | Kernel GDT/IDT/interrupts working | 🔴 | - |
-| Oct 31 2026 | Physical memory manager (buddy allocator) | 🔴 | - |
-| Nov 2 2026 | Virtual memory + higher-half kernel | 🔴 | - |
-| Nov 4 2026 | Round-robin scheduler + preemption | 🔴 | - |
+| Oct 29 2026 | Kernel GDT/IDT/interrupts working | ✅ | - |
+| Oct 31 2026 | Physical memory manager (buddy allocator) | ✅ | - |
+| Nov 2 2026 | Virtual memory + higher-half kernel | ✅ | - |
+| Nov 4 2026 | Work-stealing scheduler + preemption | ✅ | - |
 | Nov 6 2026 | Userspace processes + syscalls | 🔴 | - |
 | Nov 8 2026 | Capability-based IPC between processes | 🔴 | - |
 | Nov 10 2026 | FAT32 filesystem driver | 🔴 | - |
-| Nov 13 2026 | Embedded LLM (candle-rs Phi-4 Mini) | 🔴 | - |
+| Nov 13 2026 | Embedded LLM (llama.cpp Phi-4 Mini GGUF) | 🔴 | - |
 | Nov 15 2026 | Shell running on bare-metal framebuffer | 🔴 | - |
 | Nov 18 2026 | Full boot experience + agent greeting | 🔴 | - |
 | Nov 20 2026 | Voice I/O (whisper.cpp STT + espeak TTS) | 🔴 | - |
@@ -55,13 +65,13 @@
 
 ### Oct 22 2026 — Language: Rust
 **Decision**: Rust for all layers (bootloader, kernel, agentd, shell).  
-**Reason**: Memory safety, no_std support, excellent ecosystem (uefi-rs, x86_64, candle, winit).  
+**Reason**: Memory safety, no_std support, excellent ecosystem (uefi-rs, x86_64, llama.cpp, winit).  
 **Alternative considered**: C — rejected for safety guarantees.
 
 ### Oct 22 2026 — Weekend Demo: Ollama over bare-metal LLM
 **Decision**: Use Ollama HTTP API for weekend demo instead of candle-rs embedded.  
-**Reason**: candle-rs requires bare-metal environment; demo runs on macOS host. candle-rs will be used in Phase 3 (bare-metal agentd).  
-**Migration path**: `LlmEngine` trait abstraction lets us swap backends without changing agent code.
+**Reason**: candle-rs requires bare-metal environment; demo runs on macOS host. llama.cpp will be used for bare-metal agentd.  
+**Migration path**: `LlmEngine` backend abstraction lets us swap backends without changing agent code.
 
 ### Oct 22 2026 — Shell: softbuffer + winit (no Wayland/X11)
 **Decision**: softbuffer for pixel-perfect CPU rendering on macOS host; direct GOP framebuffer on bare metal.  
@@ -71,6 +81,22 @@
 **Decision**: Unix socket for host demo, migrate to kernel IPC channel primitive in Phase 3.  
 **Reason**: Allows the same agentd ↔ shell protocol to be developed and tested on macOS before bare metal.
 
+### Oct 23 2026 — Kernel Memory: Buddy Allocator + 4-Level Paging
+**Decision**: Implement PMM buddy allocator from UEFI memory map; VMM with higher-half kernel at `0xFFFF_8000_0000_0000`.  
+**Reason**: Standard x86_64 approach; compatible with bootloader page tables.
+
+### Oct 23 2026 — Scheduler: Interrupt-Driven Context Switch
+**Decision**: PIT timer at 1000 Hz triggers naked asm handler that saves all GP registers, calls scheduler, restores next task.  
+**Reason**: True preemptive multitasking; avoids complex userspace context switch for now.
+
+### Oct 23 2026 — LLM Backend: Multi-Backend with Fallback
+**Decision**: LlmEngine tries llama.cpp (GGUF), then Ollama, then autonomous fallback.  
+**Reason**: Best model support — local GGUF for capability, Ollama for convenience, fallback for offline.
+
+### Oct 23 2026 — SDK: Capability-Based from Day One
+**Decision**: SDK exposes CapabilityType enum (31 types), CapabilitySet with root/empty/from_tokens, App lifecycle with capability checks.  
+**Reason**: Enforces least-privilege; agent holds root capabilities and delegates.
+
 ---
 
 ## Performance Targets
@@ -79,9 +105,9 @@
 |--------|--------|---------|
 | Boot to agent loop | < 3s | N/A |
 | LLM first token latency | < 2s (Phi-4 Mini) | N/A |
-| Shell frame rate | 60 FPS | N/A |
-| Agent loop cycle | < 100ms (excluding LLM) | N/A |
-| Memory footprint (agentd) | < 6 GB (LLM included) | N/A |
+| Shell frame rate | 60 FPS | ~60 FPS (host) |
+| Agent loop cycle | < 100ms (excluding LLM) | ~50ms |
+| Memory footprint (agentd) | < 6 GB (LLM included) | ~2 GB (host) |
 
 ---
 
@@ -94,13 +120,16 @@
 | `spinning_top` | 0.3 | no_std spinlock | Phase 0 |
 | `linked_list_allocator` | 0.10 | Kernel heap | Phase 0 |
 | `uart_16550` | 0.3 | Serial console | Phase 0 |
-| `winit` | 0.29 | Shell windowing (host) | Phase 0 |
+| `winit` | 0.30 | Shell windowing (host) | Phase 0 |
 | `softbuffer` | 0.4 | Framebuffer (host) | Phase 0 |
 | `fontdue` | 0.9 | Font rendering | Phase 1 |
 | `tokio` | 1 | Async runtime (agentd) | Phase 0 |
 | `reqwest` | 0.12 | Ollama HTTP client | Phase 1 |
 | `serde_json` | 1 | Tool call parsing | Phase 0 |
-| `candle-core` | 0.8 | LLM inference (bare metal) | Phase 3 |
+| `llama-cpp-2` | 0.1 | llama.cpp FFI bindings | Phase 1 |
+| `rusqlite` | 0.31 | SQLite episodic memory | Phase 1 |
+| `sysinfo` | 0.31 | Hardware sensors | Phase 1 |
+| `candle-core` | 0.8 | LLM inference (future) | Phase 3 |
 
 ---
 

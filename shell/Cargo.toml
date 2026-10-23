@@ -8,8 +8,8 @@ name = "zuupos-shell"
 path = "src/main.rs"
 
 [dependencies]
-# Windowing — use 0.29 which uses ApplicationHandler trait
-winit = { version = "0.29", features = ["rwh_05"] }
+# Windowing — use 0.30 with new ApplicationHandler API
+winit = { version = "0.30", features = ["rwh_05"] }
 # Software framebuffer — pixel-perfect CPU rendering
 softbuffer = "0.4"
 # Font rendering — no_std compatible, pure Rust

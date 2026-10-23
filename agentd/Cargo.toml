@@ -36,3 +36,11 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Random number generation for planner variance
 rand = "0.8"
+
+# llama.cpp FFI for local GGUF model inference
+llama-cpp-2 = "0.1"
+
+[features]
+default = ["ollama"]
+ollama = []
+llama_cpp = []

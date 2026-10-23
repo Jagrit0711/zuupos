@@ -15,7 +15,7 @@ path = "src/main.rs"
 # For logging (no_std compatible)
 log = { version = "0.4", default-features = false }
 # Bare-metal abstractions
-x86_64 = "0.15"
+x86_64 = { workspace = true }
 # Spinning mutex (no OS needed)
 spinning_top = "0.3"
 # Bitmap allocator for page frames
@@ -25,7 +25,7 @@ uart_16550 = "0.3"
 # For volatile reads/writes
 volatile = "0.5"
 # ACPI parsing
-acpi = "6.1"
+acpi = { workspace = true }
 # For lazy initialization
 conquer-once = { version = "0.4", default-features = false }
 # Interrupt handling

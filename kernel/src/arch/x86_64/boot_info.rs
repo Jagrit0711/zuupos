@@ -14,4 +14,6 @@ pub struct BootInfo {
     pub kernel_phys_start: u64,
     pub kernel_phys_end: u64,
     pub rsdp_addr: u64,
+    pub pml4_addr: u64,
+    pub physical_memory_offset: u64,
 }

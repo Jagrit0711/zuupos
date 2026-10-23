@@ -60,11 +60,11 @@ extern "x86-interrupt" fn page_fault_handler(
     );
 }
 
-extern "x86-interrupt" fn timer_handler(_frame: InterruptStackFrame) {
-    // Tick the scheduler on every timer interrupt
-    crate::sched::tick();
-    // EOI
-    unsafe { PICS.lock().notify_end_of_interrupt(PIC_1_OFFSET) };
+// Timer handler wrapper that calls the naked function in sched
+extern "x86-interrupt" fn timer_handler(mut frame: InterruptStackFrame) {
+    unsafe {
+        crate::sched::timer_handler_entry(&mut frame as *mut InterruptStackFrame);
+    }
 }
 
 extern "x86-interrupt" fn keyboard_handler(_frame: InterruptStackFrame) {

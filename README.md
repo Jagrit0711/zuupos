@@ -49,15 +49,16 @@ Think Taby, but it *is* the entire operating system.
 │                                                                │
 │  ┌─────────────────┐  ┌──────────────────┐  ┌──────────────┐  │
 │  │   LLM Engine    │  │   Tool Registry  │  │ Agent Loop   │  │
-│  │ (candle-rs /    │  │  • FS operations │  │ • Perceive   │  │
+│  │ (Ollama HTTP /  │  │  • FS operations │  │ • Perceive   │  │
 │  │  llama.cpp FFI) │  │  • Process spawn │  │ • Reason     │  │
-│  │                 │  │  • Display write │  │ • Act        │  │
-│  │  Phi-4 / Llama  │  │  • Net requests  │  │ • Reflect    │  │
-│  └─────────────────┘  └──────────────────┘  └──────────────┘  │
+│  │                 │  │  • Display write │  │ • Plan       │  │
+│  │  Phi-4 / Llama  │  │  • Net requests  │  │ • Act        │  │
+│  └─────────────────┘  └──────────────────┘  │ • Reflect    │  │
+│                                             └──────────────┘  │
 │                                                                │
 │  ┌────────────────────────────────────────────────────────┐    │
 │  │               CONTEXT ENGINE (Long Memory)              │    │
-│  │  Vector store (custom HNSW) + Event stream + Episodic  │    │
+│  │  SQLite Episodic + Pattern Mining + Working Memory     │    │
 │  └────────────────────────────────────────────────────────┘    │
 └────────────────────────┬───────────────────────────────────────┘
                          │ Framebuffer / Display Protocol
@@ -85,32 +86,43 @@ zuupos/
 ├── kernel/              # Microkernel (Rust, no_std)
 │   ├── src/
 │   │   ├── main.rs      # Kernel entry point
-│   │   ├── arch/        # x86-64 specific (GDT, IDT, paging)
-│   │   ├── mm/          # Memory management
-│   │   ├── sched/       # Scheduler
+│   │   ├── arch/        # x86-64 specific (GDT, IDT, paging, PIT)
+│   │   ├── mm/          # Memory management (PMM buddy, VMM 4-level)
+│   │   ├── sched/       # Work-stealing scheduler
 │   │   ├── ipc/         # Inter-process communication
-│   │   └── drivers/     # Core drivers (VGA, UART, PS2, PCI)
+│   │   └── drivers/     # Core drivers (VGA, UART, PS2, PCI, NVMe)
 │   └── Cargo.toml
 ├── agentd/              # Agentic runtime daemon
 │   ├── src/
 │   │   ├── main.rs
 │   │   ├── agent/       # Core ReAct loop
-│   │   ├── llm/         # LLM backend (candle-rs / llama.cpp FFI)
+│   │   ├── llm/         # LLM backend (Ollama / llama.cpp FFI / fallback)
+│   │   ├── planner/     # Multi-step task planner
 │   │   ├── tools/       # Tool implementations
-│   │   ├── context/     # Vector store + memory
-│   │   └── voice/       # whisper.cpp + TTS
+│   │   ├── context/     # SQLite episodic memory + pattern mining
+│   │   ├── sensors/     # Hardware telemetry (CPU, RAM, load)
+│   │   └── voice/       # whisper.cpp + TTS stubs
 │   └── Cargo.toml
 ├── shell/               # Agentic visual shell
 │   ├── src/
 │   │   ├── main.rs
-│   │   ├── compositor/  # Framebuffer compositor
-│   │   ├── renderer/    # GPU-accelerated 2D (softbuffer/wgpu)
+│   │   ├── compositor/  # Framebuffer compositor (winit 0.30 ApplicationHandler)
+│   │   ├── renderer/    # Softbuffer 2D renderer
 │   │   ├── avatar/      # AI face animations (Taby-style)
-│   │   └── cards/       # Dynamic UI card system
+│   │   ├── cards/       # Dynamic UI card system
+│   │   └── ipc/         # Unix domain socket IPC
 │   └── Cargo.toml
 ├── sdk/                 # Developer SDK for building OS apps
+│   ├── src/
+│   │   ├── lib.rs
+│   │   ├── capabilities.rs  # Capability tokens & CapabilitySet
+│   │   ├── app.rs           # App manifest & lifecycle
+│   │   ├── tools.rs         # Tool registration & JSON Schema
+│   │   └── ui.rs            # Card/Widget primitives & ShellMessage
+│   └── Cargo.toml
 ├── tools/               # Build tools, QEMU runner, disk image creator
 │   ├── run.sh
+│   ├── run-demo.sh
 │   └── build-iso.sh
 ├── Cargo.toml           # Workspace root
 └── README.md
@@ -128,20 +140,21 @@ No ambient authority. Every process holds explicit capability tokens to access r
 
 ### 3. Event-Driven Agent Loop
 ```
-PERCEIVE → REASON → ACT → REFLECT → (loop)
+PERCEIVE → REASON → PLAN → ACT → REFLECT → (loop)
 ```
 The agent daemon receives a continuous stream of system events (hardware interrupts, timer ticks, user input, network events) and decides autonomously what to do.
 
 ### 4. Local, Private AI
 No cloud dependency. The LLM runs on-device using:
-- `candle` (pure Rust ML framework by HuggingFace) for smaller models (Phi-4, Gemma)
 - `llama.cpp` via FFI for larger GGUF models (Llama 3 8B, Mistral 7B)
+- `Ollama` HTTP API for development/demo
+- Autonomous time-aware fallback when offline
 
 ### 5. Persistent Context
 The OS maintains a long-horizon memory:
-- **Episodic memory**: what happened in the last N sessions
-- **Semantic memory**: HNSW vector store of user patterns
-- **Working memory**: current task stack + active context window
+- **Episodic memory**: SQLite-backed session history
+- **Semantic memory**: Behavioral pattern mining from tool usage
+- **Working memory**: Current task stack + active context window
 
 ---
 
@@ -149,18 +162,19 @@ The OS maintains a long-horizon memory:
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **1.1** | Bootloader: UEFI app compiled for `x86_64-unknown-uefi` | ✅ Ready |
-| **1.2** | Kernel: GDT/IDT/interrupts structure & abstractions | 🔄 In Progress |
-| **1.3** | Kernel: Memory management (VMM/PMM) | 🔴 TODO |
-| **1.4** | Kernel: Drivers & GOP framebuffer output | 🔴 TODO |
-| **1.5** | Agentd: ReAct loop + live Ollama (`llama3.2:latest`) & candle runtime | ✅ Working |
-| **1.6** | Agentd: Multi-step Task Planner (`agentd/src/planner/`) | ✅ Working |
-| **1.7** | Agentd: Hardware Telemetry Sensors (`agentd/src/sensors/`) | ✅ Working |
-| **1.8** | Agentd: Persistent SQLite memory & pattern learning (`agentd/src/context/`) | ✅ Working |
-| **1.9** | Shell: Softbuffer compositor + avatar emotion + fontdue Inter | ✅ Working |
-| **1.10** | Shell: Live CPU/RAM HUD + animated multi-step Task Plan panel | ✅ Working |
-| **1.11** | IPC: Unix domain socket bridge (`/tmp/zuupos_shell.sock`) | ✅ Working |
-| **1.12** | Host Demo: Full end-to-end macOS agentic OS preview | ✅ Working |
+| **1.1** | Bootloader: UEFI app compiled for `x86_64-unknown-uefi` | ✅ Done |
+| **1.2** | Kernel: GDT/IDT/interrupts, PMM (buddy), VMM (4-level paging) | ✅ Done |
+| **1.3** | Kernel: Work-stealing scheduler + PIT timer + preemption | ✅ Done |
+| **1.4** | Kernel: PCI enumeration, NVMe skeleton, PS/2 keyboard, GOP framebuffer | ✅ Done |
+| **1.5** | Agentd: ReAct loop + Ollama + llama.cpp FFI + fallback | ✅ Done |
+| **1.6** | Agentd: Multi-step Task Planner | ✅ Done |
+| **1.7** | Agentd: Hardware Telemetry Sensors | ✅ Done |
+| **1.8** | Agentd: SQLite Episodic Memory & pattern mining | ✅ Done |
+| **1.9** | Shell: Softbuffer compositor + avatar + fontdue | ✅ Done |
+| **1.10** | Shell: Live CPU/RAM HUD + animated Task Plan panel | ✅ Done |
+| **1.11** | IPC: Unix domain socket bridge | ✅ Done |
+| **1.12** | Host Demo: Full end-to-end macOS agentic OS preview | ✅ Done |
+| **1.13** | SDK: Capability-based IPC, tool calling framework, UI primitives | ✅ Done |
 
 ---
 
@@ -186,6 +200,46 @@ cargo run -p zuupos-shell
 cargo run -p zuupos-agentd
 ```
 
+### Building the Bare-Metal Kernel
+
+```bash
+# Build kernel for x86_64 bare metal
+cargo build -p zuupos-kernel --target x86_64-unknown-none
+
+# Build UEFI bootloader
+cargo build -p zuupos-boot --target x86_64-unknown-uefi
+```
+
+---
+
+## SDK Usage
+
+Add `zuupos-sdk` to your `Cargo.toml` and build capability-bound apps:
+
+```rust
+use zuupos_sdk::prelude::*;
+
+let manifest = AppManifest::new("my-app", "1.0.0")
+    .with_description("An AI-native app")
+    .require_capability(CapabilityType::CallLlm)
+    .require_capability(CapabilityType::ShowCard);
+
+let mut app = App::new(manifest);
+app.register()?;
+let pid = app.spawn()?;
+
+// Register tools the agent can call
+let mut tools = ToolRegistry::new();
+tools.register_function(
+    "greet",
+    "Say hello to the user",
+    tool_params! {
+        "name" => { type: "string", desc: "User's name", required: true }
+    },
+    |args| Ok(json!({ "message": format!("Hello, {}!", args["name"]) }))
+);
+```
+
 ---
 
 ## Inspiration
@@ -199,4 +253,3 @@ cargo run -p zuupos-agentd
 ---
 
 *ZuuposOS — The OS that thinks for itself.*
-# zuupos

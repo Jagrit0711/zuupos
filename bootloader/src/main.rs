@@ -13,10 +13,14 @@ extern crate alloc;
 #[global_allocator]
 static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
 
+use alloc::vec::Vec;
 use log::info;
 use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams};
 use uefi::prelude::*;
 use uefi::proto::console::gop::GraphicsOutput;
+use uefi::proto::media::file::{File, FileAttribute, FileMode, FileType};
+use uefi::proto::media::fs::SimpleFileSystem;
+use uefi::table::boot::MemoryDescriptor;
 
 /// Boot information passed to the kernel.
 /// Must be kept in sync with `kernel/src/arch/x86_64/boot_info.rs`.
@@ -37,6 +41,10 @@ pub struct BootInfo {
     pub kernel_phys_end: u64,
     /// RSDP (ACPI root) pointer
     pub rsdp_addr: u64,
+    /// Page table (PML4) physical address
+    pub pml4_addr: u64,
+    /// Physical memory offset for higher-half kernel
+    pub physical_memory_offset: u64,
 }
 
 #[entry]
@@ -50,20 +58,62 @@ fn main() -> Status {
     info!("Bootloader Phase 1.1 initializing...");
 
     // --- Acquire framebuffer via GOP ---
-    if let Some((width, height, fb_addr, stride)) = acquire_framebuffer() {
-        info!("Framebuffer: {}x{} @ {:#x}, stride={}", width, height, fb_addr, stride);
-        draw_boot_splash(fb_addr, width, height, stride);
-    }
+    let (width, height, fb_addr, stride, pixel_format) = acquire_framebuffer().expect("Failed to acquire framebuffer");
+    info!("Framebuffer: {}x{} @ {:#x}, stride={}", width, height, fb_addr, stride);
+    draw_boot_splash(fb_addr, width, height, stride);
 
-    info!("ZuuposOS bootloader initialized. Halting in QEMU (Phase 1.1 stub).");
+    // --- Get memory map ---
+    let (memory_map_addr, memory_map_len, memory_map_desc_size) = get_memory_map().expect("Failed to get memory map");
+    info!("Memory map: {} entries @ {:#x}", memory_map_len / memory_map_desc_size, memory_map_addr);
 
-    loop {
-        unsafe { core::arch::asm!("hlt") }
+    // --- Find RSDP (ACPI) ---
+    let rsdp_addr = find_rsdp().unwrap_or(0);
+    info!("RSDP: {:#x}", rsdp_addr);
+
+    // --- Load kernel ELF ---
+    let (kernel_phys_start, kernel_phys_end, kernel_entry) = load_kernel().expect("Failed to load kernel");
+    info!("Kernel loaded: {:#x} - {:#x}, entry: {:#x}", kernel_phys_start, kernel_phys_end, kernel_entry);
+
+    // --- Set up page tables (higher-half kernel) ---
+    let (pml4_addr, physical_memory_offset) = setup_page_tables(kernel_phys_start, kernel_phys_end, fb_addr, width, height, stride).expect("Failed to set up page tables");
+    info!("Page tables: PML4={:#x}, phys_offset={:#x}", pml4_addr, physical_memory_offset);
+
+    // --- Prepare BootInfo ---
+    let boot_info = BootInfo {
+        memory_map_addr,
+        memory_map_len,
+        memory_map_desc_size,
+        fb_addr,
+        fb_width: width,
+        fb_height: height,
+        fb_stride: stride,
+        fb_pixel_format: pixel_format,
+        kernel_phys_start,
+        kernel_phys_end,
+        rsdp_addr,
+        pml4_addr,
+        physical_memory_offset,
+    };
+
+    // --- Exit boot services ---
+    info!("Exiting boot services...");
+    let mut bt = uefi::boot::exit_boot_services();
+
+    // --- Jump to kernel ---
+    let boot_info_ptr = &boot_info as *const BootInfo;
+    info!("Jumping to kernel at {:#x}...", kernel_entry);
+    unsafe {
+        core::arch::asm!(
+            "jmp rax",
+            in("rax") kernel_entry,
+            in("rdi") boot_info_ptr,
+            options(noreturn)
+        );
     }
 }
 
-/// Returns (width, height, base_addr, stride)
-fn acquire_framebuffer() -> Option<(u32, u32, u64, u32)> {
+/// Returns (width, height, base_addr, stride, pixel_format)
+fn acquire_framebuffer() -> Option<(u32, u32, u64, u32, u32)> {
     let handle = boot::get_handle_for_protocol::<GraphicsOutput>().ok()?;
     let mut gop = unsafe {
         boot::open_protocol::<GraphicsOutput>(
@@ -81,8 +131,13 @@ fn acquire_framebuffer() -> Option<(u32, u32, u64, u32)> {
     let (width, height) = mode.resolution();
     let stride = mode.stride() as u32;
     let fb_addr = gop.frame_buffer().as_mut_ptr() as u64;
+    let pixel_format = match mode.pixel_format() {
+        uefi::proto::console::gop::PixelFormat::Rgb => 0,
+        uefi::proto::console::gop::PixelFormat::Bgr => 1,
+        _ => 0,
+    } as u32;
 
-    Some((width as u32, height as u32, fb_addr, stride))
+    Some((width as u32, height as u32, fb_addr, stride, pixel_format))
 }
 
 /// Draw a minimal boot splash to show the framebuffer works.
@@ -105,4 +160,211 @@ fn draw_boot_splash(fb_addr: u64, width: u32, height: u32, stride: u32) {
             }
         }
     }
+}
+
+fn get_memory_map() -> Option<(u64, usize, usize)> {
+    let mmap_size = boot::memory_map_size();
+    let mut buffer = Vec::with_capacity(mmap_size.map_size + 10 * mmap_size.entry_size);
+    let mmap = boot::memory_map(&mut buffer).ok()?;
+    let desc_size = mmap.entry_size();
+    let addr = buffer.as_ptr() as u64;
+    let len = buffer.len();
+    core::mem::forget(buffer);
+    Some((addr, len, desc_size))
+}
+
+fn find_rsdp() -> Option<u64> {
+    let config_table = boot::system_table().config_table();
+    for entry in config_table.iter() {
+        if entry.guid == uefi::table::cfg::ACPI2_GUID || entry.guid == uefi::table::cfg::ACPI_GUID {
+            return Some(entry.address as u64);
+        }
+    }
+    None
+}
+
+fn load_kernel() -> Option<(u64, u64, u64)> {
+    let handle = boot::get_handle_for_protocol::<SimpleFileSystem>().ok()?;
+    let mut fs = unsafe {
+        boot::open_protocol::<SimpleFileSystem>(
+            OpenProtocolParams {
+                handle,
+                agent: boot::image_handle(),
+                controller: None,
+            },
+            OpenProtocolAttributes::GetProtocol,
+        )
+        .ok()?
+    };
+
+    let mut root_dir = fs.open_volume().ok()?;
+    let mut kernel_file = root_dir.open(
+        cstr::cstr!("\\EFI\\ZUUPOS\\KERNEL.ELF"),
+        FileMode::Read,
+        FileAttribute::empty(),
+    ).ok()?;
+
+    if let FileType::Regular(file) = kernel_file.into_type().ok()? {
+        let file_size = file.get_info::<uefi::proto::media::file::FileInfo>().ok()?.file_size() as usize;
+        let mut buffer = Vec::with_capacity(file_size);
+        file.read(&mut buffer).ok()?;
+
+        let kernel_start = find_kernel_load_address(&buffer)?;
+        let kernel_end = kernel_start + file_size as u64;
+
+        // Copy kernel to physical memory
+        unsafe {
+            core::ptr::copy_nonoverlapping(buffer.as_ptr(), kernel_start as *mut u8, file_size);
+        }
+
+        let entry = parse_elf_entry(&buffer, kernel_start)?;
+        Some((kernel_start, kernel_end, entry))
+    } else {
+        None
+    }
+}
+
+fn find_kernel_load_address(buffer: &[u8]) -> Option<u64> {
+    // Simple ELF parsing to find the load address
+    // For now, use a fixed address: 2 MiB (after first 2 MiB reserved for bootloader)
+    Some(0x200000)
+}
+
+fn parse_elf_entry(buffer: &[u8], load_addr: u64) -> Option<u64> {
+    if buffer.len() < 64 {
+        return None;
+    }
+    // Check ELF magic
+    if &buffer[0..4] != b"\x7fELF" {
+        return None;
+    }
+    // 64-bit, little endian
+    if buffer[4] != 2 || buffer[5] != 1 {
+        return None;
+    }
+    // Entry point at offset 24 (8 bytes)
+    let entry = u64::from_le_bytes([
+        buffer[24], buffer[25], buffer[26], buffer[27],
+        buffer[28], buffer[29], buffer[30], buffer[31],
+    ]);
+    Some(load_addr + entry)
+}
+
+fn setup_page_tables(
+    kernel_start: u64,
+    kernel_end: u64,
+    fb_addr: u64,
+    fb_width: u32,
+    fb_height: u32,
+    fb_stride: u32,
+) -> Option<(u64, u64)> {
+    const PAGE_SIZE: u64 = 4096;
+    const KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
+    const IDENTITY_MAP_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
+
+    // Allocate page tables (PML4, PDPT, PD, PT)
+    let pml4_addr = alloc_page()?;
+    let pdpt_addr = alloc_page()?;
+    let pd_addr = alloc_page()?;
+    let pt_addr = alloc_page()?;
+
+    // Zero the pages
+    unsafe {
+        core::ptr::write_bytes(pml4_addr as *mut u8, 0, PAGE_SIZE as usize);
+        core::ptr::write_bytes(pdpt_addr as *mut u8, 0, PAGE_SIZE as usize);
+        core::ptr::write_bytes(pd_addr as *mut u8, 0, PAGE_SIZE as usize);
+        core::ptr::write_bytes(pt_addr as *mut u8, 0, PAGE_SIZE as usize);
+    }
+
+    // Map PML4[511] -> PDPT (higher-half kernel)
+    // Map PML4[0] -> PDPT (identity map low memory)
+    let pml4 = pml4_addr as *mut u64;
+    let pdpt = pdpt_addr as *mut u64;
+    let pd = pd_addr as *mut u64;
+    let pt = pt_addr as *mut u64;
+
+    // Higher-half kernel: PML4[511] -> PDPT
+    unsafe { *pml4.add(511) = pdpt_addr | 0x3 }; // Present | Writable
+
+    // Identity map: PML4[0] -> PDPT
+    unsafe { *pml4.add(0) = pdpt_addr | 0x3 };
+
+    // PDPT[0] -> PD (for both mappings, sharing)
+    unsafe { *pdpt.add(0) = pd_addr | 0x3 };
+
+    // PD[0] -> PT (first 2 MiB)
+    unsafe { *pd.add(0) = pt_addr | 0x3 };
+
+    // Map first 2 MiB identity (4 KiB pages)
+    for i in 0..512 {
+        let phys = i * PAGE_SIZE;
+        unsafe { *pt.add(i) = phys | 0x3 };
+    }
+
+    // Map kernel in higher-half (2 MiB pages)
+    let kernel_pages = (kernel_end - kernel_start + PAGE_SIZE - 1) / PAGE_SIZE;
+    let pd_kernel = alloc_page()?;
+    unsafe { core::ptr::write_bytes(pd_kernel as *mut u8, 0, PAGE_SIZE as usize) };
+    unsafe { *pdpt.add(1) = pd_kernel | 0x3 }; // PDPT[1] -> kernel PD
+
+    for i in 0..(kernel_pages as usize).min(512) {
+        let phys = kernel_start + i as u64 * PAGE_SIZE;
+        let virt = KERNEL_BASE + phys;
+        let pd_idx = (virt >> 21) & 0x1FF;
+        let pt_idx = (virt >> 12) & 0x1FF;
+
+        if pt_idx == 0 {
+            let pt_kernel = alloc_page()?;
+            unsafe { core::ptr::write_bytes(pt_kernel as *mut u8, 0, PAGE_SIZE as usize) };
+            unsafe { *(pd_kernel as *mut u64).add(pd_idx) = pt_kernel | 0x3 };
+        }
+        let pt_kernel = unsafe { *(pd_kernel as *mut u64).add(pd_idx) & !0xFFF };
+        unsafe { *(pt_kernel as *mut u64).add(pt_idx) = phys | 0x3 };
+    }
+
+    // Map framebuffer in higher-half
+    let fb_size = fb_stride as u64 * fb_height as u64 * 4;
+    let fb_pages = (fb_size + PAGE_SIZE - 1) / PAGE_SIZE;
+    for i in 0..fb_pages {
+        let phys = fb_addr + i * PAGE_SIZE;
+        let virt = KERNEL_BASE + phys;
+        let pd_idx = (virt >> 21) & 0x1FF;
+        let pt_idx = (virt >> 12) & 0x1FF;
+
+        if pt_idx == 0 {
+            let pt_fb = alloc_page()?;
+            unsafe { core::ptr::write_bytes(pt_fb as *mut u8, 0, PAGE_SIZE as usize) };
+            unsafe { *(pd_kernel as *mut u64).add(pd_idx) = pt_fb | 0x3 };
+        }
+        let pt_fb = unsafe { *(pd_kernel as *mut u64).add(pd_idx) & !0xFFF };
+        unsafe { *(pt_fb as *mut u64).add(pt_idx) = phys | 0x3 | 0x80000000000 }; // NX bit
+    }
+
+    // Physical memory offset = KERNEL_BASE (for higher-half direct mapping)
+    Some((pml4_addr, KERNEL_BASE))
+}
+
+fn alloc_page() -> Option<u64> {
+    let mmap_size = boot::memory_map_size();
+    let mut buffer = Vec::with_capacity(mmap_size.map_size + 10 * mmap_size.entry_size);
+    let mmap = boot::memory_map(&mut buffer).ok()?;
+
+    for desc in mmap.iter() {
+        if desc.ty() == uefi::table::boot::MemoryType::CONVENTIONAL {
+            let pages = desc.page_count() as u64;
+            if pages > 0 {
+                let phys = desc.phys_start();
+                // Mark as used by allocating
+                let status = boot::allocate_pages(
+                    uefi::boot::AllocateType::Address(phys),
+                    uefi::table::boot::MemoryType::LOADER_DATA,
+                    1,
+                );
+                if status.is_ok() {
+                    return Some(phys);
+                }
+            }
+        }
+    }
+    None
 }

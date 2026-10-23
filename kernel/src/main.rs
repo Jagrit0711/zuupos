@@ -59,15 +59,23 @@ pub extern "C" fn _start(boot_info: *const arch::x86_64::boot_info::BootInfo) ->
     arch::x86_64::acpi::init(boot_info);
     info!("[acpi] ACPI initialized");
 
-    // 8. Enable hardware interrupts
+    // 8. Initialize PCI subsystem
+    drivers::pci::init();
+    info!("[pci] PCI enumeration complete");
+
+    // 9. Initialize NVMe driver
+    drivers::nvme::init();
+    info!("[nvme] NVMe driver initialized");
+
+    // 10. Enable hardware interrupts
     x86_64::instructions::interrupts::enable();
     info!("[irq] Interrupts enabled");
 
-    // 9. Initialize scheduler
+    // 11. Initialize scheduler
     sched::init();
     info!("[sched] Scheduler initialized");
 
-    // 10. Spawn agentd as PID 1 — the AI agent daemon
+    // 12. Spawn agentd as PID 1 — the AI agent daemon
     //     In Phase 1.5, this will load and run the agentd ELF.
     //     For now, we enter a stub agent loop.
     info!("[kernel] Handing control to zuupos-agentd (PID 1)...");
