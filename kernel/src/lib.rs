@@ -11,3 +11,4 @@ pub mod drivers;
 pub mod ipc;
 pub mod mm;
 pub mod sched;
+pub mod syscall;

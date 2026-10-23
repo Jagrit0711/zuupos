@@ -7,6 +7,7 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, Pag
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
+pub const SYSCALL_VECTOR: u8 = 0x80;
 
 pub static PICS: Spinlock<ChainedPics> =
     Spinlock::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
@@ -26,6 +27,8 @@ lazy_static! {
         idt[PIC_1_OFFSET].set_handler_fn(timer_handler);
         // Keyboard IRQ (IRQ1 → vector 0x21 / 33)
         idt[PIC_1_OFFSET + 1].set_handler_fn(keyboard_handler);
+        // Syscall (int 0x80)
+        idt[SYSCALL_VECTOR].set_handler_fn(syscall_handler);
         idt
     };
 }
@@ -76,4 +79,103 @@ extern "x86-interrupt" fn keyboard_handler(_frame: InterruptStackFrame) {
     let scancode: u8 = unsafe { port.read() };
     crate::drivers::keyboard::handle_scancode(scancode);
     unsafe { PICS.lock().notify_end_of_interrupt(PIC_1_OFFSET + 1) };
+}
+
+// Syscall handler (int 0x80) - naked to preserve all registers
+#[unsafe(naked)]
+extern "x86-interrupt" fn syscall_handler(_frame: InterruptStackFrame) {
+    unsafe {
+        core::arch::naked_asm!(
+            // Save all general-purpose registers
+            "push rax", "push rbx", "push rcx", "push rdx",
+            "push rsi", "push rdi", "push rbp",
+            "push r8",  "push r9",  "push r10", "push r11",
+            "push r12", "push r13", "push r14", "push r15",
+            // Syscall number in RAX, args in RDI, RSI, RDX, R10, R8, R9
+            // Call handle_syscall with registers on stack
+            "mov rdi, rsp",
+            "call {handle_syscall_inline}",
+            // Restore registers
+            "pop r15", "pop r14", "pop r13", "pop r12",
+            "pop r11", "pop r10", "pop r9",  "pop r8",
+            "pop rbp", "pop rdi", "pop rsi", "pop rdx",
+            "pop rcx", "pop rbx", "pop rax",
+            // Return from interrupt
+            "iretq",
+            handle_syscall_inline = sym syscall_handler_inline
+        );
+    }
+}
+
+// Inline syscall handler - avoids module visibility issues
+#[repr(C)]
+struct SyscallRegs {
+    rax: u64, rbx: u64, rcx: u64, rdx: u64,
+    rsi: u64, rdi: u64, rbp: u64, _rsp: u64,
+    r8: u64, r9: u64, r10: u64, r11: u64,
+    r12: u64, r13: u64, r14: u64, r15: u64,
+}
+
+#[no_mangle]
+pub extern "C" fn syscall_handler_inline(regs: &mut SyscallRegs) {
+    let syscall_num = regs.rax;
+    let arg0 = regs.rdi;
+    let arg1 = regs.rsi;
+    let arg2 = regs.rdx;
+    let arg3 = regs.r10;
+    let arg4 = regs.r8;
+    let _arg5 = regs.r9;
+
+    let result = match syscall_num {
+        0 => { // SYS_EXIT
+            crate::sched::exit_current();
+            0 // Never returns
+        }
+        1 => { // SYS_YIELD
+            crate::sched::yield_now();
+            0
+        }
+        2 => { // SYS_GETPID
+            crate::sched::current_pid().unwrap_or(0) as u64
+        }
+        3 => { // SYS_WRITE
+            syscall_write(arg0, arg1, arg2)
+        }
+        4 => { // SYS_MAP_MEMORY
+            crate::mm::virt::map(arg0, arg1, arg2, arg3);
+            arg1
+        }
+        5 => { // SYS_ALLOC_MEMORY
+            crate::mm::phys::alloc_frames(arg0 as usize).unwrap_or(0)
+        }
+        6 => { // SYS_FREE_MEMORY
+            crate::mm::phys::free_frames(arg0, arg1 as usize);
+            0
+        }
+        7 => { // SYS_SPAWN
+            crate::sched::spawn_process(arg0, x86_64::VirtAddr::new(arg1), x86_64::PhysAddr::new(arg2)) as u64
+        }
+        8 => { // SYS_FB_WRITE
+            crate::drivers::framebuffer::put_pixel(arg0 as u32, arg1 as u32, arg2 as u32);
+            0
+        }
+        _ => {
+            log::warn!("[syscall] Unknown syscall: {}", syscall_num);
+            u64::MAX
+        }
+    };
+    regs.rax = result;
+}
+
+fn syscall_write(fd: u64, buf: u64, len: u64) -> u64 {
+    if fd != 1 && fd != 2 {
+        return 0;
+    }
+    use x86_64::instructions::port::Port;
+    let mut serial = Port::<u8>::new(0x3F8);
+    let slice = unsafe { core::slice::from_raw_parts(buf as *const u8, len as usize) };
+    for &byte in slice {
+        unsafe { serial.write(byte); }
+    }
+    len
 }
