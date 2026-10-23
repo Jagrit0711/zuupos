@@ -19,14 +19,14 @@
 | Oct 22 2026 | UEFI bootloader verified with `x86_64-unknown-uefi` target | ✅ | `pending` |
 | Oct 22 2026 | Kernel GDT/IDT/interrupts & bare-metal build (`x86_64-unknown-none`) | ✅ | `pending` |
 | Oct 22 2026 | Release binaries built (`zuupos-boot.efi` + `zuupos-kernel` ELF) | ✅ | `pending` |
-| Oct 22 2026 | Host demo launcher (`tools/run-demo.sh`) verified working end-to-end | ✅ | `pending` |
-| Oct 22 2026 | GitHub Actions CI/CD (.github/workflows/ci.yml) | ✅ | `pending` |
-| Oct 23 2026 | Multi-Step Task Planner with sequential decomposition (`agentd/src/planner/mod.rs`) | ✅ | `pending` |
-| Oct 23 2026 | Hardware Telemetry Sensors for CPU, RAM, & load avg (`agentd/src/sensors/mod.rs`) | ✅ | `pending` |
-| Oct 23 2026 | SQLite Episodic Memory & behavioral pattern mining (`agentd/src/context/mod.rs`) | ✅ | `pending` |
-| Oct 23 2026 | Shell HUD with smoothed gauges & animated Task Plan panel (`shell/src/renderer/mod.rs`) | ✅ | `pending` |
-| Oct 23 2026 | Extended Avatar emotions (`Processing`) + Speaking mouth waveform | ✅ | `pending` |
-| Oct 23 2026 | Zero-warning build pipeline across host crates & bare-metal targets | ✅ | `pending` |
+| Oct 22 2026 | Host demo launcher (`tools/run-demo.sh`) verified working end-to-end | ✅ | `3518437` |
+| Oct 22 2026 | GitHub Actions CI/CD (.github/workflows/ci.yml) | ✅ | `3518437` |
+| Oct 23 2026 | Multi-Step Task Planner with sequential decomposition (`agentd/src/planner/mod.rs`) | ✅ | `3518437` |
+| Oct 23 2026 | Hardware Telemetry Sensors for CPU, RAM, & load avg (`agentd/src/sensors/mod.rs`) | ✅ | `3518437` |
+| Oct 23 2026 | SQLite Episodic Memory & behavioral pattern mining (`agentd/src/context/mod.rs`) | ✅ | `3518437` |
+| Oct 23 2026 | Shell HUD with smoothed gauges & animated Task Plan panel (`shell/src/renderer/mod.rs`) | ✅ | `3518437` |
+| Oct 23 2026 | Extended Avatar emotions (`Processing`) + Speaking mouth waveform | ✅ | `3518437` |
+| Oct 23 2026 | Zero-warning build pipeline across host crates & bare-metal targets | ✅ | `3518437` |
 | Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
 | Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | in progress |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | 🔴 | - |
