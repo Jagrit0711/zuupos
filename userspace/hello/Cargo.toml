@@ -1,0 +1,8 @@
+[package]
+name = "zuupos-hello"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "zuupos-hello"
+path = "src/main.rs"

@@ -51,6 +51,8 @@ jobs:
         run: cargo check -p zuupos-kernel --target x86_64-unknown-none
       - name: Check bootloader
         run: cargo check -p zuupos-boot --target x86_64-unknown-uefi
+      - name: Check userspace hello
+        run: cargo check -p zuupos-hello --target x86_64-unknown-none
 
   release:
     name: Build release binaries

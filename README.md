@@ -3,6 +3,24 @@
 > An AI-Native Agentic Operating System built from scratch in Rust.  
 > No windows. No icons. No menus. Just an AI that *is* the OS.
 
+**Current version: v0.5.0** — see [RECORD.md](RECORD.md) for the full build log.
+
+---
+
+## Status at a Glance (v0.5.0)
+
+| Layer | State |
+|-------|-------|
+| Bootloader (`zuupos-boot`) | ✅ Builds for `x86_64-unknown-uefi`, reads kernel + initramfs from disk |
+| Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, scheduler, syscall ABI, capability IPC channels. ELF-loading the initramfs into a real userspace process is the next step (currently a scheduler stub) |
+| Userspace (`userspace/hello`) | ✅ First freestanding userspace binary, builds + packs into `target/initramfs.cpio` via `tools/build-initramfs.sh` |
+| Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — real reasoning → plan → tool-call cycles |
+| Shell (`zuupos-shell`) | ✅ Compositor + avatar + HUD verified running and connecting to agentd over the IPC socket |
+| SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
+| QEMU boot | 🔄 `tools/run-qemu.sh` builds the image and launches QEMU (TCG, since Apple Silicon hosts can't hardware-accelerate x86_64); full GPT/FAT32 disk-image creation currently targets Linux hosts (`parted`/`losetup`/`mkfs.fat`) |
+
+The fastest way to see it working today is the **host demo** below — it runs the real shell + real agent + real local LLM on your machine right now.
+
 ---
 
 ## Vision
@@ -89,7 +107,8 @@ zuupos/
 │   │   ├── arch/        # x86-64 specific (GDT, IDT, paging, PIT)
 │   │   ├── mm/          # Memory management (PMM buddy, VMM 4-level)
 │   │   ├── sched/       # Work-stealing scheduler
-│   │   ├── ipc/         # Inter-process communication
+│   │   ├── ipc/         # Capability-based IPC channels
+│   │   ├── syscall/     # Syscall ABI (exit, yield, getpid, write, mmap, spawn, ipc, fb)
 │   │   └── drivers/     # Core drivers (VGA, UART, PS2, PCI, NVMe)
 │   └── Cargo.toml
 ├── agentd/              # Agentic runtime daemon
@@ -120,10 +139,16 @@ zuupos/
 │   │   ├── tools.rs         # Tool registration & JSON Schema
 │   │   └── ui.rs            # Card/Widget primitives & ShellMessage
 │   └── Cargo.toml
+├── userspace/           # Freestanding userspace programs (no_std, raw syscalls)
+│   └── hello/           # First userspace binary — packed into the initramfs
+│       ├── src/main.rs
+│       └── Cargo.toml
 ├── tools/               # Build tools, QEMU runner, disk image creator
 │   ├── run.sh
-│   ├── run-demo.sh
-│   └── build-iso.sh
+│   ├── run-demo.sh      # Host demo launcher (shell + agentd, no QEMU needed)
+│   ├── run-qemu.sh      # Builds kernel+bootloader, boots the disk image in QEMU
+│   ├── create-disk-image.sh
+│   └── build-initramfs.sh  # Packs userspace/ binaries into target/initramfs.cpio
 ├── Cargo.toml           # Workspace root
 └── README.md
 ```
@@ -175,6 +200,11 @@ The OS maintains a long-horizon memory:
 | **1.11** | IPC: Unix domain socket bridge | ✅ Done |
 | **1.12** | Host Demo: Full end-to-end macOS agentic OS preview | ✅ Done |
 | **1.13** | SDK: Capability-based IPC, tool calling framework, UI primitives | ✅ Done |
+| **1.14** | Kernel: Syscall ABI (int 0x80) + IDT wiring | ✅ Done |
+| **1.15** | Kernel: Capability-based IPC channels (send/recv, rights) | ✅ Done |
+| **1.16** | Bootloader: initramfs loading from disk into memory | ✅ Done |
+| **1.17** | Userspace: first `no_std` program (`zuupos-hello`) + initramfs packer | ✅ Done |
+| **1.18** | Kernel: load & exec the initramfs ELF as the real PID 1 | 🔄 In progress (scheduler currently spawns a stub entry point) |
 
 ---
 
@@ -208,7 +238,24 @@ cargo build -p zuupos-kernel --target x86_64-unknown-none
 
 # Build UEFI bootloader
 cargo build -p zuupos-boot --target x86_64-unknown-uefi
+
+# Build the first userspace program and pack it into an initramfs
+cargo build -p zuupos-hello --target x86_64-unknown-none --release
+./tools/build-initramfs.sh
 ```
+
+### Booting in QEMU
+
+```bash
+./tools/run-qemu.sh
+```
+
+`run-qemu.sh` auto-detects the host: on Linux it uses KVM when `/dev/kvm` is
+available, on macOS it falls back to pure TCG emulation (Apple Silicon hosts
+cannot hardware-accelerate an x86_64 guest). Disk-image creation
+(`tools/create-disk-image.sh`) currently relies on Linux-only tooling
+(`parted`, `losetup`, `mkfs.fat`); run it on Linux or in a Linux container
+until a macOS-native path (`hdiutil`/`diskutil`) is added.
 
 ---
 

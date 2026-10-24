@@ -20,7 +20,10 @@ fn main() {
         .init();
 
     info!("╔════════════════════════════════════════╗");
-    info!("║      ZuuposOS Shell v0.1 starting      ║");
+    info!(
+        "║  ZuuposOS Shell v{} starting   ║",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("║    AI-driven agentic UI compositor     ║");
     info!("╚════════════════════════════════════════╝");
 

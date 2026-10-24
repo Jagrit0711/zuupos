@@ -66,24 +66,41 @@ if [[ ! -f "$OVMF_CODE" ]]; then
     exit 1
 fi
 
+# Pick an accelerator/CPU/display that actually exists on this host.
+# Apple Silicon hosts run x86_64 QEMU purely under TCG (no KVM/HVF across
+# architectures), so "-cpu host" and "-accel kvm" are Linux/x86-host-only.
+ACCEL="tcg"
+CPU="qemu64"
+DISPLAY_BACKEND="${ZUUPOS_QEMU_DISPLAY:-none}"
+case "$(uname -s)" in
+    Linux)
+        if [[ -e /dev/kvm ]]; then ACCEL="kvm:tcg"; CPU="host"; fi
+        DISPLAY_BACKEND="${ZUUPOS_QEMU_DISPLAY:-gtk}"
+        ;;
+    Darwin)
+        if [[ "$(uname -m)" == "x86_64" ]]; then ACCEL="hvf:tcg"; CPU="host"; fi
+        DISPLAY_BACKEND="${ZUUPOS_QEMU_DISPLAY:-cocoa}"
+        ;;
+esac
+
 echo "Starting QEMU..."
 echo "  Disk: $DISK_IMG"
 echo "  Kernel: $KERNEL_ELF"
 echo "  Bootloader: $BOOTLOADER_EFI"
 echo "  OVMF: $OVMF_CODE"
+echo "  Accel: $ACCEL | CPU: $CPU | Display: $DISPLAY_BACKEND"
 
 # Run QEMU
 exec qemu-system-x86_64 \
-    -machine q35,accel=kvm:tcg \
-    -cpu host \
+    -machine q35,accel="$ACCEL" \
+    -cpu "$CPU" \
     -m 2G \
     -smp 4 \
-    -bios "$OVMF_CODE" \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$OVMF_VARS" \
     -drive if=virtio,format=raw,file="$DISK_IMG" \
     -serial stdio \
-    -display gtk,gl=on \
+    -display "$DISPLAY_BACKEND" \
     -device virtio-gpu-pci \
     -device virtio-keyboard-pci \
     -device virtio-mouse-pci \

@@ -38,14 +38,23 @@
 | Oct 23 2026 | **SDK: Card/Widget primitives, ShellMessage IPC, Emotion enum** | ✅ | `pending` |
 | Oct 23 2026 | **Shell: winit 0.30 ApplicationHandler migration** | ✅ | `pending` |
 | Oct 23 2026 | **Bootloader: Fixed for uefi 0.33 API** (MemoryType, AllocateType, cstr16, with_config_table) | ✅ | `db36e6a` |
+| Oct 23 2026 | **Kernel: Fixed clippy warnings across all crates for CI** | ✅ | `6ab0b46` |
+| Oct 23 2026 | **Kernel: Syscall interface (int 0x80 ABI) + IDT wiring + QEMU runner script** | ✅ | `892b621` |
+| Oct 23 2026 | **Bootloader: initramfs loading from disk, passed to kernel via BootInfo** | ✅ | `d68b910` |
+| Oct 23 2026 | **Kernel: Capability-based IPC channels (send/recv, rights, per-pid)** | ✅ | `b3f150c` |
+| Oct 24 2026 | **v0.5.0: workspace version bump, `userspace/hello` wired into the workspace + CI** | ✅ | `pending` |
+| Oct 24 2026 | **Userspace: `zuupos-hello` builds for `x86_64-unknown-none`; `tools/build-initramfs.sh` verified producing `target/initramfs.cpio`** | ✅ | `pending` |
+| Oct 24 2026 | **`tools/run-qemu.sh` fixed for Apple Silicon hosts** (TCG accel, `qemu64` CPU, `cocoa`/`none` display — `-cpu host`/KVM/gtk were Linux-x86-host-only) | ✅ | `pending` |
+| Oct 24 2026 | **Full workspace build verified**: all 6 crates (boot, kernel, agentd, shell, sdk, userspace/hello) compile clean on both host and bare-metal targets; `cargo fmt --check` + `cargo clippy -D warnings` + `cargo test` all pass for host crates | ✅ | `pending` |
+| Oct 24 2026 | **Host demo re-verified end-to-end live**: shell compositor + agentd both launched, agentd completed a real PERCEIVE→REASON→PLAN→ACT→REFLECT cycle against local Ollama (`llama3.2:latest`) and executed `display_card`/`speak`/`dim_display` tool calls | ✅ | `pending` |
 | Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
-| Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | in progress |
+| Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | blocked on macOS disk-image tooling, see decision below |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | ✅ | - |
 | Oct 31 2026 | Physical memory manager (buddy allocator) | ✅ | - |
 | Nov 2 2026 | Virtual memory + higher-half kernel | ✅ | - |
 | Nov 4 2026 | Work-stealing scheduler + preemption | ✅ | - |
-| Nov 6 2026 | Userspace processes + syscalls | 🔴 | - |
-| Nov 8 2026 | Capability-based IPC between processes | 🔴 | - |
+| Nov 6 2026 | Userspace processes + syscalls | 🔄 | syscall ABI + first userspace binary done; kernel-side ELF loader to exec the initramfs as real PID 1 still stubbed (`sched::spawn_init_process` uses a hardcoded entry point) |
+| Nov 8 2026 | Capability-based IPC between processes | ✅ | channel primitive done (`b3f150c`); still needs a syscall-level send/recv wrapper exposed to userspace |
 | Nov 10 2026 | FAT32 filesystem driver | 🔴 | - |
 | Nov 13 2026 | Embedded LLM (llama.cpp Phi-4 Mini GGUF) | 🔴 | - |
 | Nov 15 2026 | Shell running on bare-metal framebuffer | 🔴 | - |
@@ -98,6 +107,16 @@
 **Decision**: SDK exposes CapabilityType enum (31 types), CapabilitySet with root/empty/from_tokens, App lifecycle with capability checks.  
 **Reason**: Enforces least-privilege; agent holds root capabilities and delegates.
 
+### Oct 24 2026 — v0.5.0: workspace member instead of standalone crate for userspace
+**Decision**: `userspace/hello` joined the top-level Cargo workspace (`Cargo.toml` members) rather than staying a free-standing crate with its own `[workspace]` table.  
+**Reason**: It already needed the same `x86_64-unknown-none` target and nightly toolchain as the kernel; standalone it failed to build ("believes it's in a workspace when it's not"). Removed its unused `alloc`/`Vec` import and duplicate `[profile.*]` tables (inherited from the workspace root) at the same time.  
+**Follow-up**: dropped `#![feature(panic_info_message)]` — stabilized upstream, the nightly flag now errors as an internal-feature use.
+
+### Oct 24 2026 — QEMU runner: no hardware acceleration on Apple Silicon
+**Decision**: `tools/run-qemu.sh` now detects the host OS/arch and picks `-accel tcg` + `-cpu qemu64` + `-display cocoa` (macOS) or `-accel kvm:tcg` + `-cpu host` + `-display gtk` (Linux with `/dev/kvm`), instead of hardcoding the Linux/KVM flags.  
+**Reason**: `-cpu host` and `kvm`/`gtk` assume an x86_64 Linux host. This dev machine is Apple Silicon running x86_64 QEMU under pure emulation — KVM and GTK aren't available at all, and `-cpu host` with no matching accelerator is meaningless. `ZUUPOS_QEMU_DISPLAY` env var still allows an override.  
+**Known gap**: `tools/create-disk-image.sh` still shells out to `parted`/`losetup`/`mkfs.fat`/`efibootmgr`, which don't exist on macOS — the GPT/FAT32 image step needs a Linux host (or a future `hdiutil`-based rewrite) until that's ported.
+
 ---
 
 ## Performance Targets
@@ -131,6 +150,8 @@
 | `rusqlite` | 0.31 | SQLite episodic memory | Phase 1 |
 | `sysinfo` | 0.31 | Hardware sensors | Phase 1 |
 | `candle-core` | 0.8 | LLM inference (future) | Phase 3 |
+
+`userspace/hello` is dependency-free (`#![no_std]`, raw `int 0x80` syscalls only) — it links against nothing but `core`.
 
 ---
 

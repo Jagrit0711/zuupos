@@ -23,7 +23,10 @@ async fn main() {
         .init();
 
     info!("╔══════════════════════════════════════════════════════╗");
-    info!("║          ZuuposOS Agentic Runtime Daemon v0.2        ║");
+    info!(
+        "║      ZuuposOS Agentic Runtime Daemon v{}         ║",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("║   PERCEIVE → REASON → PLAN → ACT → REFLECT → loop   ║");
     info!("║   Sensors: sysinfo | Memory: SQLite | LLM: Ollama    ║");
     info!("╚══════════════════════════════════════════════════════╝");
