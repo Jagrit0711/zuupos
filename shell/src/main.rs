@@ -4,15 +4,8 @@
 //! On bare metal this becomes a framebuffer-direct process; on macOS host
 //! it runs as a native window for rapid development.
 
-mod avatar;
-mod cards;
-mod compositor;
-mod ipc;
-mod renderer;
-mod theme;
-
-use compositor::run_shell;
 use log::info;
+use zuupos_shell::compositor::run_shell;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))

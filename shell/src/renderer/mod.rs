@@ -39,7 +39,10 @@ struct Particle {
 // ─── Renderer ────────────────────────────────────────────────────────────────
 
 pub struct Renderer {
-    surface: Surface<Arc<Window>, Arc<Window>>,
+    /// `None` in headless mode (offline preview rendering — see
+    /// `examples/avatar_preview.rs`), where there is no real window/surface
+    /// to present frames to; every draw_* call still writes into `buf`.
+    surface: Option<Surface<Arc<Window>, Arc<Window>>>,
     width: u32,
     height: u32,
     buf: Vec<u32>,
@@ -63,7 +66,33 @@ impl Renderer {
     pub fn new(window: Arc<Window>, width: u32, height: u32) -> Self {
         let ctx = Context::new(window.clone()).expect("softbuffer context failed");
         let surface = Surface::new(&ctx, window).expect("softbuffer surface failed");
+        Self::new_internal(Some(surface), width, height)
+    }
 
+    /// Headless renderer with no backing window/surface — every draw_* call
+    /// still writes into `buf`, `present()` is a no-op, and `pixels()` lets a
+    /// caller (e.g. `examples/avatar_preview.rs`) export the frame to a file.
+    pub fn new_headless(width: u32, height: u32) -> Self {
+        Self::new_internal(None, width, height)
+    }
+
+    pub fn pixels(&self) -> &[u32] {
+        &self.buf
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn new_internal(
+        surface: Option<Surface<Arc<Window>, Arc<Window>>>,
+        width: u32,
+        height: u32,
+    ) -> Self {
         // Embedded TrueType fonts
         let font_bytes = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
         let bold_bytes = include_bytes!("../../../assets/fonts/Inter-Bold.ttf");
@@ -561,31 +590,31 @@ impl Renderer {
 
     // ── Avatar ───────────────────────────────────────────────────────────────
 
+    /// Renders ZuuposOS's "buddy" character — a soft, lit orb creature with a
+    /// pulsing antenna, expressive eyes and a continuous mouth curve instead
+    /// of hard-edged debug shapes. Everything is drawn with anti-aliased
+    /// primitives (`fill_circle_aa`/`fill_ellipse_aa`) so it reads as a
+    /// character at a glance rather than pixel-art placeholder geometry.
     fn draw_avatar(&mut self, avatar: &Avatar, tick: u64) {
-        let size: u32 = 96;
-        let margin: u32 = 20;
-        let x = margin;
-        let y = self
-            .height
-            .saturating_sub(size + margin * 2 + STATUSBAR_HEIGHT + 16);
+        let size = 96.0f32;
+        let margin = 20.0f32;
+        let r = size / 2.0;
+        let base_cx = margin + r;
+        let base_cy = (self.height.saturating_sub(96 + 40 + STATUSBAR_HEIGHT + 16)) as f32 + r;
 
         let (blink, pulse, emotion) = avatar.render_state(tick);
 
-        // Outer halo
-        let glow_r = size / 2 + 14;
-        let glow_color = lerp_color(BG_BASE, AVATAR_GLOW, pulse * 0.28);
-        self.fill_circle(x + size / 2, y + size / 2, glow_r, glow_color);
+        // Idle "breathing" bob — subtle even at rest so the character never
+        // looks frozen. Speaking/Alert breathe faster and shallower (alert).
+        let (breathe_freq, breathe_amp) = match emotion {
+            crate::avatar::Emotion::Alert => (0.12, 1.2),
+            crate::avatar::Emotion::Speaking => (0.10, 1.6),
+            _ => (0.035, 2.6),
+        };
+        let breathe = (tick as f32 * breathe_freq).sin() * breathe_amp;
+        let cx = base_cx;
+        let cy = base_cy + breathe;
 
-        // Second ring
-        let inner_glow = lerp_color(BG_BASE, AVATAR_GLOW, pulse * 0.55);
-        self.fill_circle(x + size / 2, y + size / 2, size / 2 + 5, inner_glow);
-
-        // Main circle
-        self.fill_circle(x + size / 2, y + size / 2, size / 2, AVATAR_BG);
-        // Face plane
-        self.fill_circle(x + size / 2, y + size / 2, size / 2 - 5, AVATAR_FACE);
-
-        // Eye colors per emotion
         let eye_color = match emotion {
             crate::avatar::Emotion::Idle => AVATAR_EYE,
             crate::avatar::Emotion::Thinking => ACCENT_AMBER,
@@ -595,110 +624,130 @@ impl Renderer {
             crate::avatar::Emotion::Processing => ACCENT_CYAN,
         };
 
-        let eye_y = y + size / 2 - 12;
-        let left_x = x + size / 2 - 15;
-        let right_x = x + size / 2 + 15;
+        // Ground shadow — anchored (doesn't bob), squashes slightly as the
+        // body rises, which sells the floating motion.
+        let shadow_ry = 6.0f32;
+        let shadow_rx = r * 0.78 - breathe * 0.9;
+        self.fill_ellipse_aa(
+            cx,
+            base_cy + r + 10.0,
+            shadow_rx.max(4.0),
+            shadow_ry,
+            0x000000,
+            0.30,
+        );
 
-        // Eyes (blink = squish into line)
-        if !blink {
-            self.fill_circle(left_x, eye_y, 5, eye_color);
-            self.fill_circle(right_x, eye_y, 5, eye_color);
-            // Pupils
-            self.fill_circle(left_x + 1, eye_y, 2, blend(eye_color, 0x000000, 0.5));
-            self.fill_circle(right_x + 1, eye_y, 2, blend(eye_color, 0x000000, 0.5));
-        } else {
-            self.fill_rect(left_x - 5, eye_y, 10, 2, eye_color);
-            self.fill_rect(right_x - 5, eye_y, 10, 2, eye_color);
+        // Antenna — thin stalk + glowing tip, pulses with the same rhythm as
+        // the halo so the whole character reads as one living thing.
+        let antenna_base_y = cy - r + 2.0;
+        let antenna_tip_y = antenna_base_y - 14.0 - pulse * 2.0;
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let y = antenna_base_y + (antenna_tip_y - antenna_base_y) * t;
+            self.fill_circle_aa(cx, y, 1.9, AVATAR_GLOW, 1.0);
+        }
+        let tip_glow = lerp_color(eye_color, 0xffffff, 0.15);
+        self.fill_circle_aa(cx, antenna_tip_y, 5.0 + pulse * 1.5, eye_color, 0.22);
+        self.fill_circle_aa(cx, antenna_tip_y, 2.6, tip_glow, 1.0);
+
+        // Outer halo + inner glow ring (now AA, matched to emotion color
+        // rather than always the generic purple AVATAR_GLOW).
+        let glow_tint = lerp_color(AVATAR_GLOW, eye_color, 0.35);
+        self.fill_circle_aa(cx, cy, r + 16.0, glow_tint, pulse * 0.22);
+        self.fill_circle_aa(cx, cy, r + 6.0, glow_tint, pulse * 0.40);
+
+        // Body — base sphere, then an offset lighter patch and a small
+        // specular highlight to fake directional lighting (top-left light
+        // source), which is what makes it read as an orb instead of a disc.
+        self.fill_circle_aa(cx, cy, r, AVATAR_BG, 1.0);
+        self.fill_circle_aa(cx - r * 0.12, cy - r * 0.12, r * 0.92, AVATAR_FACE, 1.0);
+        self.fill_ellipse_aa(
+            cx - r * 0.38,
+            cy - r * 0.45,
+            r * 0.30,
+            r * 0.20,
+            0xffffff,
+            0.07,
+        );
+        // Bottom ambient occlusion — subtle darkening to ground the sphere.
+        self.fill_ellipse_aa(cx, cy + r * 0.55, r * 0.85, r * 0.35, 0x000000, 0.10);
+
+        // Eyes
+        let eye_y = cy - 12.0;
+        let left_x = cx - 15.0;
+        let right_x = cx + 15.0;
+        let eye_ry = if blink { 1.2 } else { 9.0 };
+        for ex in [left_x, right_x] {
+            self.fill_ellipse_aa(ex, eye_y, 6.5, eye_ry, eye_color, 1.0);
+            if !blink {
+                self.fill_circle_aa(ex, eye_y, 2.6, blend(eye_color, 0x000000, 0.55), 1.0);
+                // Catchlight — tiny highlight dot, the single biggest thing
+                // that makes a drawn eye look alive instead of a bullet point.
+                self.fill_circle_aa(ex - 2.2, eye_y - 2.8, 1.4, 0xffffff, 0.85);
+            }
         }
 
-        // Emotion-specific face features
+        // Emotion-specific brows / cheeks, layered under the mouth.
         match emotion {
-            crate::avatar::Emotion::Thinking => {
-                // Animated bouncing dots
-                for i in 0..3u32 {
+            crate::avatar::Emotion::Alert => {
+                for (ex, tilt) in [(left_x, 1.0f32), (right_x, -1.0f32)] {
+                    for i in -2..=2 {
+                        let fx = ex + i as f32 * 2.0;
+                        let fy = eye_y - 9.0 - (i as f32 * tilt) * 0.8;
+                        self.fill_circle_aa(fx, fy, 1.4, ACCENT_RED, 1.0);
+                    }
+                }
+            }
+            crate::avatar::Emotion::Happy => {
+                let blush = blend(0xff6b6b, AVATAR_FACE, 0.55);
+                self.fill_ellipse_aa(left_x - 7.0, eye_y + 8.0, 4.5, 2.8, blush, 0.8);
+                self.fill_ellipse_aa(right_x + 7.0, eye_y + 8.0, 4.5, 2.8, blush, 0.8);
+            }
+            _ => {}
+        }
+
+        // Mouth — one continuous curve for every state instead of mismatched
+        // rects/arcs; `curve` controls smile (+) vs. worried frown (-).
+        let mouth_y = cy + 15.0;
+        match emotion {
+            crate::avatar::Emotion::Thinking | crate::avatar::Emotion::Processing => {
+                self.draw_arc_mouth(cx, mouth_y, 7.0, 1.0, 1.4, eye_color);
+                // Small bouncing "thinking" dots, offset to the upper-right
+                // of the head so they don't collide with the antenna.
+                for i in 0..3 {
                     let phase = (tick as f32 * 0.18 + i as f32 * 1.1).sin();
-                    let dot_y = (y + size / 2 + 14) as i32 - (phase * 4.0) as i32;
-                    let dot_color = lerp_color(AVATAR_FACE, ACCENT_AMBER, phase * 0.5 + 0.5);
-                    let dx = x + size / 2 - 8 + i * 9;
-                    self.fill_circle(dx, dot_y as u32, 3, dot_color);
+                    let dot_y = cy - r - 4.0 - phase * 3.0;
+                    let dot_x = cx + r * 0.55 + i as f32 * 8.0;
+                    let dot_color = lerp_color(AVATAR_FACE, eye_color, phase * 0.5 + 0.5);
+                    self.fill_circle_aa(dot_x, dot_y, 2.2, dot_color, 1.0);
                 }
             }
             crate::avatar::Emotion::Speaking => {
-                // Animated waveform mouth
-                self.draw_waveform_mouth(x, y, size, tick);
+                self.draw_waveform_mouth(cx, cy, size as u32, tick);
             }
             crate::avatar::Emotion::Happy => {
-                // Broad arc smile
-                let sy = y + size / 2 + 14;
-                let sw = 24u32;
-                let sx = x + size / 2;
-                self.fill_rect(sx - sw / 2, sy, sw, 3, eye_color);
-                self.fill_circle(sx - sw / 2, sy + 2, 3, eye_color);
-                self.fill_circle(sx + sw / 2, sy + 2, 3, eye_color);
-                // Cheek blush
-                self.fill_circle(left_x - 4, eye_y + 10, 4, blend(0xff6b6b, AVATAR_FACE, 0.6));
-                self.fill_circle(
-                    right_x + 4,
-                    eye_y + 10,
-                    4,
-                    blend(0xff6b6b, AVATAR_FACE, 0.6),
-                );
+                self.draw_arc_mouth(cx, mouth_y, 13.0, 7.0, 2.0, eye_color);
             }
             crate::avatar::Emotion::Alert => {
-                // Straight/flat concerned mouth + brow lines
-                let my = y + size / 2 + 12;
-                let mw = 18u32;
-                let mx = x + size / 2;
-                self.fill_rect(mx - mw / 2, my, mw, 2, eye_color);
-                // Brow lines (angled)
-                self.fill_rect(left_x - 5, eye_y - 8, 10, 2, ACCENT_RED);
-                self.fill_rect(right_x - 5, eye_y - 8, 10, 2, ACCENT_RED);
+                self.draw_arc_mouth(cx, mouth_y, 9.0, -4.0, 1.6, eye_color);
             }
-            _ => {
-                // Neutral slight smile
-                let sy = y + size / 2 + 14;
-                let sw = 20u32;
-                let sx = x + size / 2;
-                self.fill_rect(sx - sw / 2, sy, sw, 3, eye_color);
-                self.fill_circle(sx - sw / 2, sy + 1, 2, eye_color);
-                self.fill_circle(sx + sw / 2, sy + 1, 2, eye_color);
+            crate::avatar::Emotion::Idle => {
+                self.draw_arc_mouth(cx, mouth_y, 9.0, 3.0, 1.6, eye_color);
             }
         }
-
-        // Emotion label ring around avatar
-        let emotion_str = match emotion {
-            crate::avatar::Emotion::Idle => "IDLE",
-            crate::avatar::Emotion::Thinking => "THINKING",
-            crate::avatar::Emotion::Speaking => "SPEAKING",
-            crate::avatar::Emotion::Alert => "ALERT",
-            crate::avatar::Emotion::Happy => "HAPPY",
-            crate::avatar::Emotion::Processing => "PROCESSING",
-        };
-        self.draw_text(
-            emotion_str,
-            (x + size / 2) as i32 - 24,
-            (y + size + 6) as i32,
-            8.0,
-            blend(eye_color, 0x000000, 0.2),
-            true,
-        );
     }
 
-    fn draw_waveform_mouth(&mut self, ax: u32, ay: u32, size: u32, _tick: u64) {
-        let base_y = (ay + size / 2 + 14) as i32;
-        let base_x = (ax + size / 2) as i32;
-        let samples = self.waveform.len() as i32;
-        let wave_w = 28i32;
+    fn draw_waveform_mouth(&mut self, cx: f32, cy: f32, _size: u32, _tick: u64) {
+        let base_y = cy + 15.0;
+        let samples = self.waveform.len();
+        let wave_w = 26.0f32;
 
         for i in 0..samples {
-            let t = i as f32 / samples as f32;
-            let px = base_x - wave_w / 2 + (t * wave_w as f32) as i32;
-            let amp = self.waveform[i as usize];
-            let py = base_y - (amp * 6.0) as i32;
+            let t = i as f32 / samples.max(1) as f32;
+            let px = cx - wave_w / 2.0 + t * wave_w;
+            let py = base_y - self.waveform[i] * 6.0;
             let color = lerp_color(ACCENT_GREEN, ACCENT_CYAN, t);
-            if px >= 0 && py >= 0 && px < self.width as i32 && py < self.height as i32 {
-                self.fill_circle(px as u32, py as u32, 2, color);
-            }
+            self.fill_circle_aa(px, py, 1.8, color, 1.0);
         }
     }
 
@@ -796,6 +845,94 @@ impl Renderer {
         }
     }
 
+    /// Anti-aliased filled circle with a soft ~1px edge feather, blended onto
+    /// whatever is already in `buf`. Used by the avatar so it reads as a
+    /// smooth character instead of the jagged pixel-art circles `fill_circle`
+    /// produces at small sizes.
+    fn fill_circle_aa(&mut self, cx: f32, cy: f32, r: f32, color: u32, alpha_mul: f32) {
+        if r <= 0.0 || alpha_mul <= 0.0 {
+            return;
+        }
+        if cx + r < 0.0 || cx - r > self.width as f32 || cy + r < 0.0 || cy - r > self.height as f32
+        {
+            return;
+        }
+        let x0 = (cx - r - 1.0).floor().max(0.0) as u32;
+        let x1 = ((cx + r + 1.0).ceil() as i64).clamp(0, self.width as i64 - 1) as u32;
+        let y0 = (cy - r - 1.0).floor().max(0.0) as u32;
+        let y1 = ((cy + r + 1.0).ceil() as i64).clamp(0, self.height as i64 - 1) as u32;
+        for py in y0..=y1 {
+            for px in x0..=x1 {
+                let dx = px as f32 + 0.5 - cx;
+                let dy = py as f32 + 0.5 - cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let coverage = (r + 0.5 - dist).clamp(0.0, 1.0) * alpha_mul;
+                if coverage <= 0.0 {
+                    continue;
+                }
+                let idx = (py * self.width + px) as usize;
+                self.buf[idx] = blend_pixel(self.buf[idx], color, coverage);
+            }
+        }
+    }
+
+    /// Anti-aliased filled ellipse (same technique as `fill_circle_aa`).
+    /// Used for eyes, the ground shadow, and the specular highlight.
+    fn fill_ellipse_aa(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, color: u32, alpha_mul: f32) {
+        if rx <= 0.0 || ry <= 0.0 || alpha_mul <= 0.0 {
+            return;
+        }
+        if cx + rx < 0.0
+            || cx - rx > self.width as f32
+            || cy + ry < 0.0
+            || cy - ry > self.height as f32
+        {
+            return;
+        }
+        let x0 = (cx - rx - 1.0).floor().max(0.0) as u32;
+        let x1 = ((cx + rx + 1.0).ceil() as i64).clamp(0, self.width as i64 - 1) as u32;
+        let y0 = (cy - ry - 1.0).floor().max(0.0) as u32;
+        let y1 = ((cy + ry + 1.0).ceil() as i64).clamp(0, self.height as i64 - 1) as u32;
+        // Feather width in normalized ellipse-space, sized off the smaller axis
+        // so the edge softness stays proportional on very thin ellipses (blinks).
+        let aa = 1.0 / rx.min(ry).max(0.5);
+        for py in y0..=y1 {
+            for px in x0..=x1 {
+                let nx = (px as f32 + 0.5 - cx) / rx;
+                let ny = (py as f32 + 0.5 - cy) / ry;
+                let dist = (nx * nx + ny * ny).sqrt();
+                let coverage = ((1.0 - dist) / aa).clamp(0.0, 1.0) * alpha_mul;
+                if coverage <= 0.0 {
+                    continue;
+                }
+                let idx = (py * self.width + px) as usize;
+                self.buf[idx] = blend_pixel(self.buf[idx], color, coverage);
+            }
+        }
+    }
+
+    /// Stamps a smooth arc of small AA dots between `-half_width..half_width`
+    /// around `cx`, shaped by a parabola: positive `curve` reads as a smile
+    /// (corners pulled up relative to the center), negative as a frown/worried
+    /// mouth, ~0 as a flat line.
+    fn draw_arc_mouth(
+        &mut self,
+        cx: f32,
+        base_y: f32,
+        half_width: f32,
+        curve: f32,
+        thickness: f32,
+        color: u32,
+    ) {
+        let steps = 16;
+        for i in 0..=steps {
+            let t = (i as f32 / steps as f32) * 2.0 - 1.0;
+            let x = cx + t * half_width;
+            let y = base_y + curve * (1.0 - t * t);
+            self.fill_circle_aa(x, y, thickness, color, 1.0);
+        }
+    }
+
     fn draw_text(&mut self, text: &str, x: i32, y: i32, size: f32, color: u32, bold: bool) {
         let font = if bold { &self.font_bold } else { &self.font };
         let r = ((color >> 16) & 0xff) as f32 / 255.0;
@@ -832,10 +969,13 @@ impl Renderer {
     }
 
     fn present(&mut self) {
+        let Some(surface) = self.surface.as_mut() else {
+            return;
+        };
         let w = NonZeroU32::new(self.width).unwrap();
         let h = NonZeroU32::new(self.height).unwrap();
-        self.surface.resize(w, h).unwrap();
-        let mut frame = self.surface.buffer_mut().unwrap();
+        surface.resize(w, h).unwrap();
+        let mut frame = surface.buffer_mut().unwrap();
         frame.copy_from_slice(&self.buf);
         frame.present().unwrap();
     }

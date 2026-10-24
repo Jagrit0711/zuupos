@@ -3,6 +3,10 @@ name = "zuupos-shell"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "zuupos_shell"
+path = "src/lib.rs"
+
 [[bin]]
 name = "zuupos-shell"
 path = "src/main.rs"
@@ -24,3 +28,7 @@ log = "0.4"
 env_logger = "0.11"
 # Rand (for particle effects)
 rand = { version = "0.8", features = ["small_rng"] }
+
+[dev-dependencies]
+# PNG export for the offline avatar/HUD preview tool (examples/avatar_preview.rs)
+image = { version = "0.25", default-features = false, features = ["png"] }

@@ -41,6 +41,12 @@ pub struct CardManager {
     next_id: u64,
 }
 
+impl Default for CardManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CardManager {
     pub fn new() -> Self {
         Self {

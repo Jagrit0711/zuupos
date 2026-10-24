@@ -24,6 +24,12 @@ pub struct Avatar {
     emotion_since: u64,
 }
 
+impl Default for Avatar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Avatar {
     pub fn new() -> Self {
         Self {

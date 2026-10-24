@@ -3,11 +3,11 @@
 > An AI-Native Agentic Operating System built from scratch in Rust.  
 > No windows. No icons. No menus. Just an AI that *is* the OS.
 
-**Current version: v0.5.0** — see [RECORD.md](RECORD.md) for the full build log.
+**Current version: v0.5.1** — see [RECORD.md](RECORD.md) for the full build log.
 
 ---
 
-## Status at a Glance (v0.5.0)
+## Status at a Glance (v0.5.1)
 
 | Layer | State |
 |-------|-------|
@@ -15,7 +15,8 @@
 | Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, scheduler, syscall ABI, capability IPC channels. ELF-loading the initramfs into a real userspace process is the next step (currently a scheduler stub) |
 | Userspace (`userspace/hello`) | ✅ First freestanding userspace binary, builds + packs into `target/initramfs.cpio` via `tools/build-initramfs.sh` |
 | Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — real reasoning → plan → tool-call cycles |
-| Shell (`zuupos-shell`) | ✅ Compositor + avatar + HUD verified running and connecting to agentd over the IPC socket |
+| Shell (`zuupos-shell`) | ✅ Compositor + redesigned avatar + HUD verified running and connecting to agentd over the IPC socket |
+| Avatar character | ✅ Rebuilt as an anti-aliased orb creature (pulsing antenna, expressive eyes, one continuous mouth curve per emotion) instead of hard-edged placeholder shapes — see `shell/examples/avatar_preview.rs` |
 | SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
 | QEMU boot | 🔄 `tools/run-qemu.sh` builds the image and launches QEMU (TCG, since Apple Silicon hosts can't hardware-accelerate x86_64); full GPT/FAT32 disk-image creation currently targets Linux hosts (`parted`/`losetup`/`mkfs.fat`) |
 
@@ -124,12 +125,15 @@ zuupos/
 │   └── Cargo.toml
 ├── shell/               # Agentic visual shell
 │   ├── src/
-│   │   ├── main.rs
+│   │   ├── main.rs      # Thin binary entry point
+│   │   ├── lib.rs       # Library surface (so examples/tests can render headlessly)
 │   │   ├── compositor/  # Framebuffer compositor (winit 0.30 ApplicationHandler)
-│   │   ├── renderer/    # Softbuffer 2D renderer
-│   │   ├── avatar/      # AI face animations (Taby-style)
+│   │   ├── renderer/    # Softbuffer 2D renderer — AA primitives, the avatar character
+│   │   ├── avatar/      # AI buddy character state (emotion, blink, breathing)
 │   │   ├── cards/       # Dynamic UI card system
 │   │   └── ipc/         # Unix domain socket IPC
+│   ├── examples/
+│   │   └── avatar_preview.rs  # Headless PNG export of the character/HUD for review
 │   └── Cargo.toml
 ├── sdk/                 # Developer SDK for building OS apps
 │   ├── src/
@@ -157,8 +161,8 @@ zuupos/
 
 ## Core Design Principles
 
-### 1. AI-First, Not AI-Added
-The LLM is not a feature. It's the process manager, the shell, and the UX layer. Every user-facing decision is made by the agent.
+### 1. AI-Native, Not AI-First
+"AI-first" still implies a product that could exist without the AI and just chose to lead with it. ZuuposOS can't — there is no shell, no process manager, no UX layer that exists independent of the agent. The LLM *is* those things. Every user-facing decision is made by the agent, not routed through it.
 
 ### 2. Capability-Based Security
 No ambient authority. Every process holds explicit capability tokens to access resources. The AI agent holds the root capability set and delegates to child agents.
@@ -205,6 +209,7 @@ The OS maintains a long-horizon memory:
 | **1.16** | Bootloader: initramfs loading from disk into memory | ✅ Done |
 | **1.17** | Userspace: first `no_std` program (`zuupos-hello`) + initramfs packer | ✅ Done |
 | **1.18** | Kernel: load & exec the initramfs ELF as the real PID 1 | 🔄 In progress (scheduler currently spawns a stub entry point) |
+| **1.19** | Shell: anti-aliased avatar character redesign + headless PNG preview tool | ✅ Done |
 
 ---
 
@@ -228,6 +233,18 @@ cargo run -p zuupos-shell
 
 # Terminal 2: Run the agent runtime daemon (PID 1)
 cargo run -p zuupos-agentd
+```
+
+### Previewing the Avatar / HUD Without a Window
+
+The shell's drawing code is also exposed as a library (`zuupos_shell`), so the
+same `draw_avatar`/`draw_*` pipeline can render to an offscreen buffer and be
+dumped to PNG — no window, display server, or screen access required. Useful
+for iterating on the character/HUD design headlessly:
+
+```bash
+cargo run -p zuupos-shell --example avatar_preview
+# -> target/avatar_preview/avatar_{idle,thinking,speaking,alert,happy,processing}.png
 ```
 
 ### Building the Bare-Metal Kernel

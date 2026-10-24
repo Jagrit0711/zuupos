@@ -73,6 +73,12 @@ pub struct IpcReceiver {
     queue: Arc<Mutex<Vec<ShellEvent>>>,
 }
 
+impl Default for IpcReceiver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IpcReceiver {
     pub fn new() -> Self {
         Self {

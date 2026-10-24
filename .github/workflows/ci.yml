@@ -36,6 +36,8 @@ jobs:
         run: cargo test -p zuupos-agentd
       - name: cargo test shell
         run: cargo test -p zuupos-shell
+      - name: build avatar preview tool
+        run: cargo build -p zuupos-shell --example avatar_preview
 
   check-bare-metal:
     name: Check bare-metal crates (no_std)
