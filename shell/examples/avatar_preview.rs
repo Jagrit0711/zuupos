@@ -7,6 +7,8 @@
 use std::fs;
 use std::path::Path;
 use zuupos_shell::avatar::{Avatar, Emotion};
+use zuupos_shell::cards::{Card, CardType};
+use zuupos_shell::ipc::{PlanStep, StepStatus, SystemMetrics};
 use zuupos_shell::renderer::Renderer;
 
 const EMOTIONS: &[(&str, Emotion)] = &[
@@ -37,10 +39,8 @@ fn main() {
     let out_dir = Path::new("target/avatar_preview");
     fs::create_dir_all(out_dir).expect("create output dir");
 
-    // Wide enough that the metrics HUD (bottom-right) doesn't overlap the
-    // avatar (bottom-left), so the preview reads cleanly.
-    let width = 420;
-    let height = 300;
+    let width = 640;
+    let height = 320;
 
     for &(name, emotion) in EMOTIONS {
         let mut renderer = Renderer::new_headless(width, height);
@@ -51,7 +51,7 @@ fn main() {
         let mut tick = 0u64;
         for _ in 0..40 {
             tick += 1;
-            avatar.tick(tick);
+            avatar.tick(tick, width, height);
             renderer.render(tick, &[], &avatar, false);
         }
         save_png(&renderer, &out_dir.join(format!("avatar_{name}.png")));
@@ -65,8 +65,65 @@ fn main() {
     // next_blink defaults to 180; land squarely inside the 6-tick blink window.
     for _ in 0..182 {
         tick += 1;
-        avatar.tick(tick);
+        avatar.tick(tick, width, height);
         renderer.render(tick, &[], &avatar, false);
     }
     save_png(&renderer, &out_dir.join("avatar_idle_blink.png"));
+
+    // Full-window frames at the default launch size, with realistic sample
+    // content (a card, an active plan, live-looking metrics) so the whole
+    // composed UI — menu bar, voice dock, cards, roaming character — can be
+    // judged together instead of just the character in isolation.
+    let (fw, fh) = (1280u32, 800u32);
+    let card = Card {
+        id: 1,
+        title: "System Summary".to_string(),
+        body: "CPU: 18%, Mem: 9.1/16GB, Load: 1.20".to_string(),
+        card_type: CardType::Info,
+        age_ticks: 10,
+        max_age: 400,
+    };
+    let plan = vec![
+        PlanStep {
+            index: 0,
+            description: "Check system load".to_string(),
+            status: StepStatus::Done,
+        },
+        PlanStep {
+            index: 1,
+            description: "Summarize for the user".to_string(),
+            status: StepStatus::Active,
+        },
+        PlanStep {
+            index: 2,
+            description: "Dim display for evening".to_string(),
+            status: StepStatus::Pending,
+        },
+    ];
+    let metrics = SystemMetrics {
+        cpu_usage: 18.0,
+        mem_used_mb: 9318,
+        mem_total_mb: 16384,
+        battery_pct: None,
+        load_avg_1m: 1.20,
+    };
+
+    for (label, emotion, warmup) in [
+        ("full_ui_idle", Emotion::Idle, 30u64),
+        ("full_ui_wandered", Emotion::Idle, 400u64),
+        ("full_ui_speaking", Emotion::Speaking, 60u64),
+    ] {
+        let mut renderer = Renderer::new_headless(fw, fh);
+        renderer.metrics = Some(metrics.clone());
+        renderer.plan_steps = plan.clone();
+        let mut avatar = Avatar::new();
+        avatar.set_emotion(emotion);
+        let mut tick = 0u64;
+        for _ in 0..warmup {
+            tick += 1;
+            avatar.tick(tick, fw, fh);
+            renderer.render(tick, &[&card], &avatar, false);
+        }
+        save_png(&renderer, &out_dir.join(format!("{label}.png")));
+    }
 }

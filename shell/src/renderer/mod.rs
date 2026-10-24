@@ -162,11 +162,11 @@ impl Renderer {
         self.draw_background(tick);
         self.update_particles(tick);
         self.draw_particles();
-        self.draw_statusbar(tick);
-        self.draw_metrics_hud(tick);
+        self.draw_statusbar(tick, avatar);
         self.draw_plan_panel(tick);
         self.draw_cards(cards, tick);
         self.draw_avatar(avatar, tick);
+        self.draw_voice_dock(tick, avatar);
 
         if in_boot {
             self.draw_boot_overlay(tick);
@@ -201,18 +201,21 @@ impl Renderer {
                 let d2 = (((fx - cx2).powi(2) + (fy - cy2).powi(2)).sqrt() / w as f32).min(1.0);
                 let d3 = (((fx - cx3).powi(2) + (fy - cy3).powi(2)).sqrt() / w as f32).min(1.0);
 
-                let p1 = (1.0 - d1 * 2.2).max(0.0).powf(2.2); // violet center
-                let p2 = (1.0 - d2 * 2.5).max(0.0).powf(2.5); // indigo center
-                let p3 = (1.0 - d3 * 3.0).max(0.0).powf(3.0); // deep blue top
+                // One warm amber glow (the brand accent) plus a very faint
+                // neutral counterpoint for depth — not three competing hues.
+                // This replaces the old violet/indigo/blue "AI gradient" look.
+                let p1 = (1.0 - d1 * 2.4).max(0.0).powf(2.2); // warm amber glow
+                let p2 = (1.0 - d2 * 3.0).max(0.0).powf(2.8); // faint warm ember
+                let p3 = (1.0 - d3 * 3.4).max(0.0).powf(3.2); // barely-there cool graphite, for quiet contrast
 
                 // Noise grain
                 let nx = (x % 512) as usize;
                 let ny = (y % 512) as usize;
                 let nv = self.noise[ny * 512 + nx] as f32 / 255.0 * 0.015;
 
-                let r = (0.018 + p1 * 0.20 + p2 * 0.03 + p3 * 0.02 + nv).min(1.0);
-                let g = (0.008 + p1 * 0.02 + p2 * 0.05 + p3 * 0.06 + nv * 0.4).min(1.0);
-                let b = (0.040 + p1 * 0.24 + p2 * 0.32 + p3 * 0.28 + nv).min(1.0);
+                let r = (0.044 + p1 * 0.17 + p2 * 0.05 + p3 * 0.01 + nv).min(1.0);
+                let g = (0.038 + p1 * 0.095 + p2 * 0.03 + p3 * 0.015 + nv * 0.8).min(1.0);
+                let b = (0.034 + p1 * 0.02 + p2 * 0.015 + p3 * 0.022 + nv).min(1.0);
 
                 let ir = (r * 255.0) as u32;
                 let ig = (g * 255.0) as u32;
@@ -295,126 +298,79 @@ impl Renderer {
 
     // ── Status Bar ───────────────────────────────────────────────────────────
 
-    fn draw_statusbar(&mut self, tick: u64) {
+    /// Top menu bar — macOS-menu-bar-style: brand + live agent status on the
+    /// left, system stats and the clock as compact text "extras" on the
+    /// right. Replaces the old statusbar (which only showed a static
+    /// "Agent Active" label and a CPU gauge) and the separate floating
+    /// SYSTEM panel (which duplicated CPU/MEM here) — all system info now
+    /// lives in exactly one place, matching where a native menu bar puts it.
+    fn draw_statusbar(&mut self, tick: u64, avatar: &Avatar) {
         let w = self.width;
-        // Translucent bar background
         for x in 0..w {
             for y in 0..STATUSBAR_HEIGHT {
                 let base = if y == STATUSBAR_HEIGHT - 1 {
-                    0x1a1a2e
+                    BORDER
                 } else {
                     STATUSBAR_BG
                 };
-                // Blend bar over background
                 self.buf[(y * w + x) as usize] =
-                    blend_pixel(self.buf[(y * w + x) as usize], base, 0.85);
+                    blend_pixel(self.buf[(y * w + x) as usize], base, 0.92);
             }
         }
 
-        // Brand text
-        self.draw_text("ZUUPOS OS", 16, 9, 11.0, ACCENT_PURPLE, true);
+        // Brand
+        self.fill_circle(14, STATUSBAR_HEIGHT / 2, 3, ACCENT_PRIMARY);
+        self.draw_text("ZuuposOS", 24, 8, 11.0, TEXT_PRIMARY, true);
+        self.draw_text("v0.5", 98, 9, 8.5, TEXT_DIM, false);
+        self.fill_rect(134, 7, 1, STATUSBAR_HEIGHT - 14, BORDER);
 
-        // Separator
-        self.fill_rect(120, 10, 1, 12, 0x2d2a4a);
+        // Agent status — reflects the avatar's actual live emotion instead
+        // of a permanently-static "Agent Active" label.
+        let (_, pulse, emotion) = avatar.render_state(tick);
+        let (status_color, status_label) = match emotion {
+            crate::avatar::Emotion::Idle => (ACCENT_GREEN, "Idle"),
+            crate::avatar::Emotion::Thinking => (ACCENT_AMBER, "Thinking…"),
+            crate::avatar::Emotion::Speaking => (ACCENT_GREEN, "Speaking"),
+            crate::avatar::Emotion::Alert => (ACCENT_RED, "Alert"),
+            crate::avatar::Emotion::Happy => (0x34d399, "Happy"),
+            crate::avatar::Emotion::Processing => (ACCENT_CYAN, "Processing"),
+        };
+        let dot_color = lerp_color(0x201a14, status_color, 0.5 + pulse * 0.5);
+        self.fill_circle(150, STATUSBAR_HEIGHT / 2, 4, dot_color);
+        self.draw_text(status_label, 160, 8, 10.0, TEXT_SECONDARY, false);
 
-        // Version tag
-        self.draw_text("v0.2-alpha", 128, 9, 9.5, TEXT_DIM, false);
-
-        // Time (right)
+        // Right cluster, menu-bar-extra style: CPU · MEM · date · time.
         let now = chrono::Local::now();
         let time_str = now.format("%H:%M:%S").to_string();
-        let date_str = now.format("%d %b").to_string();
-        let tx = w as i32 - 130;
-        self.draw_text(&date_str, tx, 5, 9.0, TEXT_DIM, false);
-        self.draw_text(&time_str, tx + 50, 9, 11.0, TEXT_PRIMARY, false);
+        let date_str = now.format("%a %d %b").to_string();
+        let cpu_str = format!("CPU {:.0}%", self.smooth_cpu);
+        let mem_str = format!("MEM {:.0}%", self.smooth_mem_pct * 100.0);
 
-        // Agent pulsing dot
-        let dot_x = w / 2 - 50;
-        let pulse = (tick as f32 * 0.05).sin() * 0.5 + 0.5;
-        let dot_color = lerp_color(0x1a2a1a, ACCENT_GREEN, 0.4 + pulse * 0.6);
-        self.fill_circle(dot_x, STATUSBAR_HEIGHT / 2, 4, dot_color);
-        self.draw_text(
-            "Agent Active",
-            (dot_x + 9) as i32,
-            9,
-            10.0,
-            TEXT_SECONDARY,
-            false,
-        );
+        // Items drop off progressively (CPU, then MEM, then date) when the
+        // window is too narrow for the whole cluster, instead of overlapping
+        // the left side — the clock always stays.
+        let left_edge = 300i32;
 
-        // CPU mini-gauge in status bar
-        let cpu_bar_x = w / 2 + 40;
-        let cpu_pct = self.smooth_cpu / 100.0;
-        self.draw_text("CPU", cpu_bar_x as i32, 5, 8.5, TEXT_DIM, false);
-        self.fill_rect(cpu_bar_x + 28, 10, 50, 4, 0x1a1a2e);
-        let cpu_bar_w = (50.0 * cpu_pct) as u32;
-        let cpu_color = lerp_color(ACCENT_GREEN, ACCENT_RED, cpu_pct);
-        self.fill_rect(cpu_bar_x + 28, 10, cpu_bar_w, 4, cpu_color);
-    }
+        let time_x = w as i32 - 66;
+        self.draw_text(&time_str, time_x, 8, 10.5, TEXT_PRIMARY, false);
 
-    // ── Metrics HUD ──────────────────────────────────────────────────────────
-
-    fn draw_metrics_hud(&mut self, tick: u64) {
-        let panel_w: u32 = 150;
-        let panel_h: u32 = 88;
-        let margin: u32 = 16;
-        let x = self.width.saturating_sub(panel_w + margin);
-        let y = self.height.saturating_sub(panel_h + margin);
-
-        // Semi-transparent panel
-        for py in y..y + panel_h {
-            for px in x..x + panel_w {
-                if px < self.width && py < self.height {
-                    let idx = (py * self.width + px) as usize;
-                    self.buf[idx] = blend_pixel(self.buf[idx], 0x09090d, 0.78);
-                }
-            }
+        let date_x = time_x - 78;
+        if date_x > left_edge {
+            self.draw_text(&date_str, date_x, 8, 9.5, TEXT_DIM, false);
+            self.fill_rect((date_x - 12) as u32, 7, 1, STATUSBAR_HEIGHT - 14, BORDER);
         }
 
-        // Panel border
-        self.fill_rect(x, y, panel_w, 1, 0x2d2a4a);
-        self.fill_rect(x, y, 1, panel_h, 0x2d2a4a);
-        self.fill_rect(x + panel_w - 1, y, 1, panel_h, 0x2d2a4a);
-        self.fill_rect(x, y + panel_h - 1, panel_w, 1, 0x2d2a4a);
-        // Accent top line
-        self.fill_rect(x, y, panel_w, 2, ACCENT_PURPLE);
-
-        let xi = x as i32;
-        let yi = y as i32;
-        self.draw_text("SYSTEM", xi + 8, yi + 8, 8.5, TEXT_DIM, true);
-
-        // CPU gauge
-        self.draw_text("CPU", xi + 8, yi + 24, 9.0, TEXT_SECONDARY, false);
-        self.fill_rect(x + 36, y + 25, 90, 6, 0x1a1a2e);
-        let cpu_w = (90.0 * self.smooth_cpu / 100.0) as u32;
-        let cpu_c = lerp_color(ACCENT_GREEN, ACCENT_RED, self.smooth_cpu / 100.0);
-        self.fill_rect(x + 36, y + 25, cpu_w, 6, cpu_c);
-        let cpu_label = format!("{:.0}%", self.smooth_cpu);
-        self.draw_text(&cpu_label, xi + 130, yi + 24, 8.5, TEXT_PRIMARY, false);
-
-        // Memory gauge
-        self.draw_text("MEM", xi + 8, yi + 40, 9.0, TEXT_SECONDARY, false);
-        self.fill_rect(x + 36, y + 41, 90, 6, 0x1a1a2e);
-        let mem_w = (90.0 * self.smooth_mem_pct) as u32;
-        let mem_c = lerp_color(ACCENT_BLUE, ACCENT_AMBER, self.smooth_mem_pct);
-        self.fill_rect(x + 36, y + 41, mem_w, 6, mem_c);
-        let mem_label = format!("{:.0}%", self.smooth_mem_pct * 100.0);
-        self.draw_text(&mem_label, xi + 130, yi + 40, 8.5, TEXT_PRIMARY, false);
-
-        // Load average
-        if let Some(m) = &self.metrics.clone() {
-            let load_str = format!("Load  {:.2}", m.load_avg_1m);
-            self.draw_text(&load_str, xi + 8, yi + 58, 9.0, TEXT_SECONDARY, false);
+        let mem_x = date_x - 70;
+        if mem_x > left_edge {
+            let mem_color = lerp_color(ACCENT_GREEN, ACCENT_RED, self.smooth_mem_pct);
+            self.draw_text(&mem_str, mem_x, 8, 9.5, mem_color, false);
         }
 
-        // Pulsing dot (heartbeat)
-        let hb = (tick as f32 * 0.08).sin() * 0.5 + 0.5;
-        let hb_color = lerp_color(0x1a1a2e, ACCENT_GREEN, hb);
-        self.fill_circle(x + panel_w - 10, y + 8, 4, hb_color);
-
-        // Cycle count
-        let cycles_str = format!("Cycle #{}", tick / 60);
-        self.draw_text(&cycles_str, xi + 8, yi + 74, 8.0, TEXT_DIM, false);
+        let cpu_x = mem_x - 64;
+        if cpu_x > left_edge {
+            let cpu_color = lerp_color(ACCENT_GREEN, ACCENT_RED, self.smooth_cpu / 100.0);
+            self.draw_text(&cpu_str, cpu_x, 8, 9.5, cpu_color, false);
+        }
     }
 
     // ── Task Plan Panel ───────────────────────────────────────────────────────
@@ -445,10 +401,10 @@ impl Renderer {
         }
 
         // Border
-        self.fill_rect(x, y, panel_w, 1, 0x2d2a4a);
-        self.fill_rect(x, y, 1, panel_h, 0x2d2a4a);
-        self.fill_rect(x + panel_w - 1, y, 1, panel_h, 0x2d2a4a);
-        self.fill_rect(x, y + panel_h - 1, panel_w, 1, 0x2d2a4a);
+        self.fill_rect(x, y, panel_w, 1, BORDER);
+        self.fill_rect(x, y, 1, panel_h, BORDER);
+        self.fill_rect(x + panel_w - 1, y, 1, panel_h, BORDER);
+        self.fill_rect(x, y + panel_h - 1, panel_w, 1, BORDER);
         self.fill_rect(x, y, panel_w, 2, ACCENT_BLUE);
 
         self.draw_text(
@@ -459,7 +415,7 @@ impl Renderer {
             TEXT_DIM,
             true,
         );
-        self.fill_rect(x, y + header_h - 1, panel_w, 1, 0x1a1a2e);
+        self.fill_rect(x, y + header_h - 1, panel_w, 1, 0x201a14);
 
         let steps = self.plan_steps.clone();
         for (i, step) in steps.iter().enumerate() {
@@ -489,7 +445,7 @@ impl Renderer {
 
             // Connector line between steps
             if i + 1 < steps.len() {
-                self.fill_rect(x + 11, sy + step_h - 2, 2, 4, 0x2d2a4a);
+                self.fill_rect(x + 11, sy + step_h - 2, 2, 4, BORDER);
             }
         }
     }
@@ -525,12 +481,12 @@ impl Renderer {
             }
 
             let (bg, accent) = match card.card_type {
-                CardType::Info => (CARD_BG_INFO, ACCENT_PURPLE),
+                CardType::Info => (CARD_BG_INFO, ACCENT_PRIMARY),
                 CardType::Task => (CARD_BG_TASK, ACCENT_BLUE),
                 CardType::Alert => (CARD_BG_ALERT, ACCENT_RED),
                 CardType::Weather => (CARD_BG_WEATHER, ACCENT_CYAN),
-                CardType::Metric => (0x060f18, ACCENT_AMBER),
-                CardType::Plan => (0x07100a, ACCENT_GREEN),
+                CardType::Metric => (CARD_BG_METRIC, ACCENT_AMBER),
+                CardType::Plan => (CARD_BG_PLAN, ACCENT_GREEN),
             };
 
             // Glassmorphism card body
@@ -597,10 +553,15 @@ impl Renderer {
     /// character at a glance rather than pixel-art placeholder geometry.
     fn draw_avatar(&mut self, avatar: &Avatar, tick: u64) {
         let size = 96.0f32;
-        let margin = 20.0f32;
         let r = size / 2.0;
-        let base_cx = margin + r;
-        let base_cy = (self.height.saturating_sub(96 + 40 + STATUSBAR_HEIGHT + 16)) as f32 + r;
+        // The character roams (see Avatar::tick) instead of sitting fixed in
+        // the corner — this just reads its current position each frame.
+        let (base_cx, base_cy) = avatar.position();
+        let lean = if avatar.facing_right() {
+            1.0f32
+        } else {
+            -1.0f32
+        };
 
         let (blink, pulse, emotion) = avatar.render_state(tick);
 
@@ -639,16 +600,25 @@ impl Renderer {
 
         // Antenna — thin stalk + glowing tip, pulses with the same rhythm as
         // the halo so the whole character reads as one living thing.
+        // Leans a couple px toward the direction of travel while wandering —
+        // a tiny cue that reads as "walking that way" rather than sliding.
+        let wandering = matches!(
+            emotion,
+            crate::avatar::Emotion::Idle | crate::avatar::Emotion::Happy
+        );
+        let antenna_lean = if wandering { lean * 3.0 } else { 0.0 };
         let antenna_base_y = cy - r + 2.0;
         let antenna_tip_y = antenna_base_y - 14.0 - pulse * 2.0;
         for i in 0..=10 {
             let t = i as f32 / 10.0;
+            let x = cx + antenna_lean * t;
             let y = antenna_base_y + (antenna_tip_y - antenna_base_y) * t;
-            self.fill_circle_aa(cx, y, 1.9, AVATAR_GLOW, 1.0);
+            self.fill_circle_aa(x, y, 1.9, AVATAR_GLOW, 1.0);
         }
         let tip_glow = lerp_color(eye_color, 0xffffff, 0.15);
-        self.fill_circle_aa(cx, antenna_tip_y, 5.0 + pulse * 1.5, eye_color, 0.22);
-        self.fill_circle_aa(cx, antenna_tip_y, 2.6, tip_glow, 1.0);
+        let tip_x = cx + antenna_lean;
+        self.fill_circle_aa(tip_x, antenna_tip_y, 5.0 + pulse * 1.5, eye_color, 0.22);
+        self.fill_circle_aa(tip_x, antenna_tip_y, 2.6, tip_glow, 1.0);
 
         // Outer halo + inner glow ring (now AA, matched to emotion color
         // rather than always the generic purple AVATAR_GLOW).
@@ -766,6 +736,57 @@ impl Renderer {
         }
     }
 
+    // ── Voice Dock ────────────────────────────────────────────────────────────
+
+    /// Docked voice-input affordance on the right edge: a mic button with a
+    /// breathing "ready" ring and the wake-word hint. This is a UI affordance
+    /// only — there's no speech backend behind it yet (agentd's voice module
+    /// is still whisper.cpp/TTS stubs), so it never claims to be listening,
+    /// only ready.
+    fn draw_voice_dock(&mut self, tick: u64, avatar: &Avatar) {
+        let (_, _, emotion) = avatar.render_state(tick);
+        let cx = self.width as f32 - 46.0;
+        let cy = self.height as f32 - 120.0;
+        let r = 22.0f32;
+
+        let pulse = (tick as f32 * 0.035).sin() * 0.5 + 0.5;
+        let speaking = emotion == crate::avatar::Emotion::Speaking;
+        let ring_color = if speaking { ACCENT_GREEN } else { ACCENT_CYAN };
+
+        // Breathing "ready" ring + button body.
+        self.fill_circle_aa(
+            cx,
+            cy,
+            r + 8.0 + pulse * 3.0,
+            ring_color,
+            0.08 + pulse * 0.05,
+        );
+        self.fill_circle_aa(cx, cy, r, 0x1a1510, 1.0);
+        self.fill_circle_aa(cx, cy, r, ring_color, if speaking { 0.25 } else { 0.0 });
+
+        // Minimal mic glyph: capsule head + stem + base.
+        self.fill_ellipse_aa(cx, cy - 5.0, 5.5, 8.5, TEXT_PRIMARY, 0.92);
+        self.fill_rect((cx - 1.0) as u32, (cy + 3.0) as u32, 2, 9, TEXT_PRIMARY);
+        self.fill_rect((cx - 6.0) as u32, (cy + 12.0) as u32, 12, 2, TEXT_PRIMARY);
+
+        self.draw_text(
+            "\"Hey ZuuposOS\"",
+            (cx - 48.0) as i32,
+            (cy + r + 10.0) as i32,
+            9.0,
+            TEXT_SECONDARY,
+            false,
+        );
+        self.draw_text(
+            "tap to talk",
+            (cx - 24.0) as i32,
+            (cy + r + 24.0) as i32,
+            8.0,
+            TEXT_DIM,
+            false,
+        );
+    }
+
     // ── Boot Overlay ──────────────────────────────────────────────────────────
 
     fn draw_boot_overlay(&mut self, tick: u64) {
@@ -788,7 +809,7 @@ impl Renderer {
         let cx = (self.width / 2) as i32 - 80;
         let cy = (self.height / 2) as i32 - 20;
 
-        let logo_color = blend(BG_BASE, ACCENT_PURPLE, alpha);
+        let logo_color = blend(BG_BASE, ACCENT_PRIMARY, alpha);
         self.draw_text("ZUUPOS OS", cx, cy, 36.0, logo_color, true);
 
         let sub_color = blend(BG_BASE, TEXT_SECONDARY, alpha * 0.7);
@@ -806,7 +827,7 @@ impl Renderer {
         let dot_str: String = (0..5)
             .map(|i| if i < dots_done { '●' } else { '○' })
             .collect();
-        let dots_color = blend(BG_BASE, ACCENT_PURPLE, alpha * 0.7);
+        let dots_color = blend(BG_BASE, ACCENT_PRIMARY, alpha * 0.7);
         self.draw_text(&dot_str, cx + 60, cy + 76, 13.0, dots_color, false);
     }
 
@@ -996,9 +1017,9 @@ fn spawn_particle(rng: &mut SmallRng, w: u32, h: u32, initial: bool) -> Particle
     let size = rng.gen_range(0.8f32..3.0);
     let hue = rng.gen_range(0u32..3);
     let color = match hue {
-        0 => 0x7c3aed, // purple
-        1 => 0x2563eb, // blue
-        _ => 0x0891b2, // cyan
+        0 => ACCENT_PRIMARY, // warm amber dust
+        1 => ACCENT_AMBER,
+        _ => ACCENT_CYAN, // one cool counterpoint
     };
     Particle {
         x,

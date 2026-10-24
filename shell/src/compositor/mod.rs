@@ -199,7 +199,7 @@ impl ApplicationHandler for ShellApp {
                     }
                 }
 
-                self.avatar.tick(self.tick);
+                self.avatar.tick(self.tick, self.width, self.height);
                 self.card_manager.tick();
 
                 let in_boot = self.boot_phase == BootPhase::Splash;

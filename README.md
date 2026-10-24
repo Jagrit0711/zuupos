@@ -3,21 +3,23 @@
 > An AI-Native Agentic Operating System built from scratch in Rust.  
 > No windows. No icons. No menus. Just an AI that *is* the OS.
 
-**Current version: v0.5.1** — see [RECORD.md](RECORD.md) for the full build log.
+**Current version: v0.5.2** — see [RECORD.md](RECORD.md) for the full build log.
 
 ---
 
-## Status at a Glance (v0.5.1)
+## Status at a Glance (v0.5.2)
 
 | Layer | State |
 |-------|-------|
 | Bootloader (`zuupos-boot`) | ✅ Builds for `x86_64-unknown-uefi`, reads kernel + initramfs from disk |
 | Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, scheduler, syscall ABI, capability IPC channels. ELF-loading the initramfs into a real userspace process is the next step (currently a scheduler stub) |
 | Userspace (`userspace/hello`) | ✅ First freestanding userspace binary, builds + packs into `target/initramfs.cpio` via `tools/build-initramfs.sh` |
-| Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — real reasoning → plan → tool-call cycles |
-| Shell (`zuupos-shell`) | ✅ Compositor + redesigned avatar + HUD verified running and connecting to agentd over the IPC socket |
-| Avatar character | ✅ Rebuilt as an anti-aliased orb creature (pulsing antenna, expressive eyes, one continuous mouth curve per emotion) instead of hard-edged placeholder shapes — see `shell/examples/avatar_preview.rs` |
+| Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — real reasoning → plan → tool-call cycles. Still single-shot per cycle: no web-research tool, no OS self-model, no cross-session memory curation yet — see **Vision** in RECORD.md |
+| Shell (`zuupos-shell`) | ✅ Menu bar (time/date/CPU/MEM, live agent status), a roaming avatar, and a voice-input dock, all repainted off a warm amber palette instead of purple |
+| Avatar character | ✅ Anti-aliased orb creature that wanders the screen when idle/happy and holds still when thinking/speaking/alert — see `shell/examples/avatar_preview.rs` |
+| Voice dock | 🔄 Visual affordance only (mic button + wake-word hint, right edge) — no speech backend wired up yet, `agentd/src/voice` is still a stub |
 | SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
+| Multi-app / customization | 🔴 Not started — today there's one shell surface with agent-pushed cards, no user-facing app or window concept yet |
 | QEMU boot | 🔄 `tools/run-qemu.sh` builds the image and launches QEMU (TCG, since Apple Silicon hosts can't hardware-accelerate x86_64); full GPT/FAT32 disk-image creation currently targets Linux hosts (`parted`/`losetup`/`mkfs.fat`) |
 
 The fastest way to see it working today is the **host demo** below — it runs the real shell + real agent + real local LLM on your machine right now.
@@ -210,6 +212,10 @@ The OS maintains a long-horizon memory:
 | **1.17** | Userspace: first `no_std` program (`zuupos-hello`) + initramfs packer | ✅ Done |
 | **1.18** | Kernel: load & exec the initramfs ELF as the real PID 1 | 🔄 In progress (scheduler currently spawns a stub entry point) |
 | **1.19** | Shell: anti-aliased avatar character redesign + headless PNG preview tool | ✅ Done |
+| **1.20** | Shell: menu bar (time/stats/live agent status), roaming avatar, voice-input dock, warm palette | ✅ Done |
+| **1.21** | Agentd: tool to search the web / fetch docs when it doesn't know how to do something | 🔴 Not started |
+| **1.22** | Agentd: curate and persist "important" memories across sessions, not just log every cycle | 🔴 Not started |
+| **1.23** | Shell/SDK: a real multi-app surface (more than one agent-spawned app/window at once) | 🔴 Not started |
 
 ---
 
