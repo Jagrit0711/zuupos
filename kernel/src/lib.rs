@@ -8,7 +8,10 @@ extern crate alloc;
 
 pub mod arch;
 pub mod drivers;
+pub mod initramfs;
 pub mod ipc;
+pub mod loader;
 pub mod mm;
 pub mod sched;
 pub mod syscall;
+

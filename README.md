@@ -12,15 +12,15 @@
 | Layer | State |
 |-------|-------|
 | Bootloader (`zuupos-boot`) | ✅ Builds for `x86_64-unknown-uefi`, reads kernel + initramfs from disk |
-| Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, scheduler, syscall ABI, capability IPC channels. ELF-loading the initramfs into a real userspace process is the next step (currently a scheduler stub) |
+| Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, work-stealing scheduler, syscall ABI, capability IPC channels, CPIO initramfs extraction, and ELF64 loader mapping real PID 1 |
 | Userspace (`userspace/hello`) | ✅ First freestanding userspace binary, builds + packs into `target/initramfs.cpio` via `tools/build-initramfs.sh` |
-| Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — real reasoning → plan → tool-call cycles. Still single-shot per cycle: no web-research tool, no OS self-model, no cross-session memory curation yet — see **Vision** in RECORD.md |
-| Shell (`zuupos-shell`) | ✅ Menu bar (time/date/CPU/MEM, live agent status), a roaming avatar, and a voice-input dock, all repainted off a warm amber palette instead of purple |
+| Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — reasoning → plan → tool-call cycles. Equipped with autonomous web search, doc fetcher, system introspection, and persistent curated memory |
+| Shell (`zuupos-shell`) | ✅ Menu bar (time/date/CPU/MEM, live agent status), roaming avatar, and voice-input dock, repainted off warm amber palette |
 | Avatar character | ✅ Anti-aliased orb creature that wanders the screen when idle/happy and holds still when thinking/speaking/alert — see `shell/examples/avatar_preview.rs` |
 | Voice dock | 🔄 Visual affordance only (mic button + wake-word hint, right edge) — no speech backend wired up yet, `agentd/src/voice` is still a stub |
 | SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
-| Multi-app / customization | 🔴 Not started — today there's one shell surface with agent-pushed cards, no user-facing app or window concept yet |
-| QEMU boot | 🔄 `tools/run-qemu.sh` builds the image and launches QEMU (TCG, since Apple Silicon hosts can't hardware-accelerate x86_64); full GPT/FAT32 disk-image creation currently targets Linux hosts (`parted`/`losetup`/`mkfs.fat`) |
+| Multi-app / customization | 🔄 Multi-card surface and app window manager integration in progress |
+| QEMU boot | 🔄 `tools/run-qemu.sh` boots in QEMU (TCG on Apple Silicon; native macOS disk-image builder in progress) |
 
 The fastest way to see it working today is the **host demo** below — it runs the real shell + real agent + real local LLM on your machine right now.
 
@@ -210,12 +210,12 @@ The OS maintains a long-horizon memory:
 | **1.15** | Kernel: Capability-based IPC channels (send/recv, rights) | ✅ Done |
 | **1.16** | Bootloader: initramfs loading from disk into memory | ✅ Done |
 | **1.17** | Userspace: first `no_std` program (`zuupos-hello`) + initramfs packer | ✅ Done |
-| **1.18** | Kernel: load & exec the initramfs ELF as the real PID 1 | 🔄 In progress (scheduler currently spawns a stub entry point) |
+| **1.18** | Kernel: load & exec the initramfs ELF as the real PID 1 | ✅ Done (CPIO parser + ELF64 segment loader + user stack setup in `kernel/src/sched/mod.rs`) |
 | **1.19** | Shell: anti-aliased avatar character redesign + headless PNG preview tool | ✅ Done |
 | **1.20** | Shell: menu bar (time/stats/live agent status), roaming avatar, voice-input dock, warm palette | ✅ Done |
-| **1.21** | Agentd: tool to search the web / fetch docs when it doesn't know how to do something | 🔴 Not started |
-| **1.22** | Agentd: curate and persist "important" memories across sessions, not just log every cycle | 🔴 Not started |
-| **1.23** | Shell/SDK: a real multi-app surface (more than one agent-spawned app/window at once) | 🔴 Not started |
+| **1.21** | Agentd: tool to search the web / fetch docs when it doesn't know how to do something | ✅ Done (`web_search`, `fetch_doc`, `inspect_system` in `agentd/src/tools/research.rs`) |
+| **1.22** | Agentd: curate and persist "important" memories across sessions, not just log every cycle | ✅ Done (SQLite `curated_notes` table, persistent recall, injected into prompt context) |
+| **1.23** | Shell/SDK: a real multi-app surface (more than one agent-spawned app/window at once) | 🔄 In progress |
 
 ---
 

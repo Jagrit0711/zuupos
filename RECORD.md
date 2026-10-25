@@ -52,13 +52,17 @@
 | Oct 24 2026 | **Fixed `new_without_default` clippy regressions surfaced by the lib split** (`Avatar`, `CardManager`, `IpcReceiver` — the lint only fires on externally-reachable items, which a bin-only crate never has) | ✅ | `pending` |
 | Oct 24 2026 | **v0.5.2: UI overhaul after direct feedback that the shell "looked like a year-long project" with no clear interaction model** — see decision below for the full list (palette, menu bar, avatar roaming, voice dock) | ✅ | `pending` |
 | Oct 25 2026 | **DEMO 1**: Shell + live LLM agent on macOS host | ✅ | `pending` |
-| Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | blocked on macOS disk-image tooling, see decision below |
+| Oct 25 2026 | **Kernel: CPIO initramfs parser (`kernel/src/initramfs.rs`) & ELF64 process loader (`kernel/src/loader.rs`)** — extracts `/bin/hello`, maps PT_LOAD segments, sets user stack, spawns real PID 1 | ✅ | `pending` |
+| Oct 25 2026 | **Kernel: Capability IPC syscalls (`SYS_IPC_SEND`, `SYS_IPC_RECV`)** wired into syscall dispatcher (`kernel/src/syscall/mod.rs`) | ✅ | `pending` |
+| Oct 25 2026 | **Agentd: Autonomous research tools (`web_search`, `fetch_doc`, `inspect_system`, `remember_fact`, `recall_memory`)** in `agentd/src/tools/research.rs` | ✅ | `pending` |
+| Oct 25 2026 | **Agentd: Curated long-term memory across sessions** (`curated_notes` in SQLite, injected into LLM reasoning prompt) | ✅ | `pending` |
+| Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | native macOS disk image creation (`hdiutil` UDTO raw disk) & QEMU runner integration |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | ✅ | - |
 | Oct 31 2026 | Physical memory manager (buddy allocator) | ✅ | - |
 | Nov 2 2026 | Virtual memory + higher-half kernel | ✅ | - |
 | Nov 4 2026 | Work-stealing scheduler + preemption | ✅ | - |
-| Nov 6 2026 | Userspace processes + syscalls | 🔄 | syscall ABI + first userspace binary done; kernel-side ELF loader to exec the initramfs as real PID 1 still stubbed (`sched::spawn_init_process` uses a hardcoded entry point) |
-| Nov 8 2026 | Capability-based IPC between processes | ✅ | channel primitive done (`b3f150c`); still needs a syscall-level send/recv wrapper exposed to userspace |
+| Nov 6 2026 | Userspace processes + syscalls | ✅ | ELF64 loader + user stack + int 0x80 syscalls complete |
+| Nov 8 2026 | Capability-based IPC between processes | ✅ | channel primitive + `SYS_IPC_SEND`/`SYS_IPC_RECV` complete |
 | Nov 10 2026 | FAT32 filesystem driver | 🔴 | - |
 | Nov 13 2026 | Embedded LLM (llama.cpp Phi-4 Mini GGUF) | 🔴 | - |
 | Nov 15 2026 | Shell running on bare-metal framebuffer | 🔴 | - |
@@ -142,7 +146,23 @@
 
 **Verification**: `shell/examples/avatar_preview.rs` was extended to render full 1280×800 frames (not just the avatar crop) with sample cards/plan steps/metrics populated, at `full_ui_idle` / `full_ui_wandered` / `full_ui_speaking` ticks — confirmed the avatar's position actually differs between the first two (roaming works), the menu bar status label tracks emotion, and the voice dock's ring color shifts green while Speaking. Caught and fixed a real layout bug this way: the right-side stats cluster's absolute positioning overlapped the left side at narrow widths (a self-inflicted issue in a 420px-wide test canvas, but a legitimate robustness gap — fixed with the progressive drop-off described above). Re-ran the live host demo (shell + agentd) after the change; starts clean, no panics.
 
-**Known gaps, stated plainly rather than implemented half-way**: no multi-app/window surface yet (one shell, agent-pushed cards only); no web-search/self-research tool for agentd; no cross-session memory curation (episodic SQLite log exists, nothing picks "important" rows back out); no local/cloud LLM tiering or billing. These are real product-scope items, not UI polish — see **Vision** below.
+**Known gaps, stated plainly rather than implemented half-way**: multi-app/window surface in shell/SDK (in progress); local/cloud LLM tiering and billing.
+
+### Oct 25 2026 — Autonomous Research Tools & System Introspection (Roadmap 1.21)
+**Decision**: Added `web_search`, `fetch_doc`, `inspect_system`, `remember_fact`, and `recall_memory` to `agentd/src/tools/research.rs`.
+**Reason**: To think like Claude Code on an OS level, the agent needs the agency to discover how to perform unknown tasks: searching documentation (DuckDuckGo API / Wikipedia), reading web documentation, inspecting live hardware and system processes, and remembering critical findings.
+
+### Oct 25 2026 — Curated Long-Term Memory (Roadmap 1.22)
+**Decision**: Created `curated_notes` in SQLite (`agentd/src/context/mod.rs`) distinct from raw episodic execution logs. The agent curates and persists high-signal memories across sessions, which are injected directly into the LLM system prompt on every cycle.
+**Reason**: Logging every cycle to episodic memory without curation wastes prompt tokens; curating high-signal architectural and system memories gives the agent compounding learning across restarts.
+
+### Oct 25 2026 — Kernel Initramfs CPIO Parser & ELF64 Loader (Roadmap 1.18)
+**Decision**: Created `kernel/src/initramfs.rs` (CPIO newc parser) and `kernel/src/loader.rs` (ELF64 segment mapper and user stack allocator at `0x0000_7FFF_FFFF_0000`). `sched::spawn_init_from_initramfs(&BootInfo)` parses `/bin/hello` from the bootloader memory buffer and spawns real PID 1.
+**Reason**: Replaces the hardcoded dummy entry point with genuine userspace process execution from memory.
+
+### Oct 25 2026 — Capability IPC Syscalls
+**Decision**: Wired `SYS_IPC_SEND` and `SYS_IPC_RECV` in `kernel/src/syscall/mod.rs` connected to `kernel/src/ipc/mod.rs`.
+**Reason**: Enables userspace processes and future child agents to exchange capability-checked messages across memory boundaries.
 
 ---
 

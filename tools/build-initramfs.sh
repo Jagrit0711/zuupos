@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+export PATH="$HOME/.cargo/bin:$PATH"
+
 OUTPUT="${1:-/Users/zylon/Documents/zuupos/target/initramfs.cpio}"
 BUILD_DIR="/Users/zylon/Documents/zuupos/userspace"
 HELLO_BIN="/Users/zylon/Documents/zuupos/target/x86_64-unknown-none/release/zuupos-hello"

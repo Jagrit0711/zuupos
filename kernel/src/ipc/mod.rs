@@ -123,6 +123,35 @@ pub fn channel_table() -> Option<ChannelTable> {
 }
 
 pub fn create_channel() -> Result<ChannelId, &'static str> {
-    // This is a stub - in reality would use the global table
-    Ok(ChannelId(NEXT_CHANNEL_ID.fetch_add(1, Ordering::Relaxed)))
+    let mut guard = CHANNEL_TABLE.lock();
+    if guard.is_none() {
+        *guard = Some(ChannelTable::new());
+    }
+    let table = guard.as_ref().unwrap();
+    let channel = table.create();
+    if let Some(pid) = current_pid() {
+        channel.grant(pid, CapabilityRight::Both);
+    }
+    Ok(channel.id)
+}
+
+pub fn send_message(channel_id: u64, payload: alloc::vec::Vec<u8>) -> Result<(), &'static str> {
+    let guard = CHANNEL_TABLE.lock();
+    if let Some(ref table) = *guard {
+        if let Some(channel) = table.get(ChannelId(channel_id)) {
+            let pid = current_pid().unwrap_or(0);
+            return channel.send(Message { sender_pid: pid, payload });
+        }
+    }
+    Err("Channel not found")
+}
+
+pub fn recv_message(channel_id: u64) -> Result<Option<Message>, &'static str> {
+    let guard = CHANNEL_TABLE.lock();
+    if let Some(ref table) = *guard {
+        if let Some(channel) = table.get(ChannelId(channel_id)) {
+            return channel.recv();
+        }
+    }
+    Err("Channel not found")
 }

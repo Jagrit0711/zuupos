@@ -3,7 +3,6 @@
 
 #![no_std]
 #![no_main]
-#![feature(lang_items)]
 
 use core::panic::PanicInfo;
 
@@ -82,6 +81,3 @@ fn panic(_info: &PanicInfo) -> ! {
     syscall(SYS_EXIT, 1, 0, 0, 0, 0, 0);
     loop {}
 }
-
-#[lang = "eh_personality"]
-extern "C" fn eh_personality() {}

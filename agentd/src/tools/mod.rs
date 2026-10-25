@@ -4,10 +4,15 @@
 //! and invoked by name from the agent loop. This is the capability boundary:
 //! the agent can ONLY affect the world through tools.
 
+pub mod research;
+
+use crate::context::ContextEngine;
 use crate::ipc::{Card, CardType, Emotion, IpcClient, ShellEvent};
 use log::{info, warn};
+use research::{FetchDocTool, InspectSystemTool, RecallMemoryTool, RememberFactTool, WebSearchTool};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -27,7 +32,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    pub fn new(ipc: IpcClient) -> Self {
+    pub fn new(ipc: IpcClient, context: Arc<Mutex<ContextEngine>>) -> Self {
         let mut reg = Self {
             tools: HashMap::new(),
         };
@@ -38,6 +43,14 @@ impl ToolRegistry {
         reg.register(Box::new(RunCommandTool));
         reg.register(Box::new(DimDisplayTool));
         reg.register(Box::new(FocusMusicTool { ipc }));
+
+        // Autonomous Research, System Inspection & Memory Tools
+        reg.register(Box::new(WebSearchTool::new()));
+        reg.register(Box::new(FetchDocTool::new()));
+        reg.register(Box::new(InspectSystemTool));
+        reg.register(Box::new(RememberFactTool::new(context.clone())));
+        reg.register(Box::new(RecallMemoryTool::new(context)));
+
         reg
     }
 

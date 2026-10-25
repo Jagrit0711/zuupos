@@ -18,6 +18,8 @@ use log::{debug, info, warn};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use std::sync::{Arc, Mutex};
+
 pub struct AgentConfig {
     pub model_path: String,
     pub system_prompt: String,
@@ -30,7 +32,7 @@ pub struct AgentConfig {
 pub struct Agent {
     config: AgentConfig,
     llm: LlmEngine,
-    context: ContextEngine,
+    context: Arc<Mutex<ContextEngine>>,
     tools: ToolRegistry,
     planner: Planner,
     sensors: SensorHub,
@@ -46,9 +48,9 @@ impl Agent {
             config.model_path
         );
         let llm = LlmEngine::load(&config.model_path, config.temperature).await;
-        let context = ContextEngine::new(config.context_window);
+        let context = Arc::new(Mutex::new(ContextEngine::new(config.context_window)));
         let ipc = IpcClient::new();
-        let tools = ToolRegistry::new(ipc.clone());
+        let tools = ToolRegistry::new(ipc.clone(), context.clone());
         let planner = Planner::new(ipc.clone());
         let sensors = SensorHub::new();
 
@@ -130,14 +132,17 @@ impl Agent {
             .unwrap_or(0);
 
         let now = Local::now();
-        let context_summary = format!(
-            "{} | CPU:{:.0}% Mem:{}/{}MB | Patterns: {}",
-            now.format("%H:%M:%S"),
-            metrics.cpu_usage,
-            metrics.mem_used_mb,
-            metrics.mem_total_mb,
-            self.context.get_summary()
-        );
+        let context_summary = {
+            let ctx = self.context.lock().unwrap();
+            format!(
+                "{} | CPU:{:.0}% Mem:{}/{}MB | Patterns: {}",
+                now.format("%H:%M:%S"),
+                metrics.cpu_usage,
+                metrics.mem_used_mb,
+                metrics.mem_total_mb,
+                ctx.get_summary()
+            )
+        };
 
         let events = self.collect_system_events(&metrics);
 
@@ -188,15 +193,20 @@ impl Agent {
             _ => "Late night / early morning — minimal intervention",
         };
 
-        let patterns = self.context.get_patterns();
-        let pattern_summary = if patterns.is_empty() {
-            "No patterns learned yet.".to_string()
-        } else {
-            patterns
-                .iter()
-                .map(|p| format!("{}={} (×{})", p.key, p.value, p.frequency))
-                .collect::<Vec<_>>()
-                .join(", ")
+        let (patterns, curated_summary) = {
+            let ctx = self.context.lock().unwrap();
+            let patterns = ctx.get_patterns();
+            let pattern_summary = if patterns.is_empty() {
+                "No patterns learned yet.".to_string()
+            } else {
+                patterns
+                    .iter()
+                    .map(|p| format!("{}={} (×{})", p.key, p.value, p.frequency))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let curated = ctx.get_curated_summary();
+            (pattern_summary, curated)
         };
 
         let prompt = format!(
@@ -206,6 +216,8 @@ SYSTEM: CPU {cpu:.1}% | Mem {mem_used}/{mem_total}MB | Load {load:.2}
 EVENTS: {events:?}
 MEMORY (recent): {context}
 PATTERNS (learned): {patterns}
+CURATED LONG-TERM KNOWLEDGE:
+{curated_summary}
 
 As ZuuposOS, you proactively assist the user without being asked.
 Based on the above telemetry and context, decide what to do now.
@@ -219,7 +231,8 @@ Output JSON tool calls for each action (one per line, no other text needed):"#,
             load = metrics.load_avg_1m,
             events = perception.events,
             context = perception.context_summary,
-            patterns = pattern_summary,
+            patterns = patterns,
+            curated_summary = curated_summary,
         );
 
         self.llm
@@ -249,12 +262,14 @@ Output JSON tool calls for each action (one per line, no other text needed):"#,
     // ── REFLECT ──────────────────────────────────────────────────────────────
 
     async fn reflect(&mut self, perception: &Perception, reasoning: &str, results: &[ToolResult]) {
-        self.context
-            .store_episode(perception, reasoning, results)
-            .await;
+        let cycles = {
+            let mut ctx = self.context.lock().unwrap();
+            ctx.store_episode(perception, reasoning, results);
+            ctx.cycle_count()
+        };
         info!(
             "[agent] Reflected. Total memory episodes: {}",
-            self.context.cycle_count()
+            cycles
         );
     }
 

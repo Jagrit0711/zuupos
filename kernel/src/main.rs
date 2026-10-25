@@ -12,9 +12,12 @@ extern crate alloc;
 
 mod arch;
 mod drivers;
+mod initramfs;
 mod ipc;
+mod loader;
 mod mm;
 mod sched;
+mod syscall;
 
 use core::panic::PanicInfo;
 use log::info;
@@ -32,7 +35,7 @@ pub extern "C" fn _start(boot_info: *const arch::x86_64::boot_info::BootInfo) ->
         .expect("Failed to set logger");
 
     info!("╔══════════════════════════════════════╗");
-    info!("║   ZuuposOS Kernel v0.1.0 booting...  ║");
+    info!("║   ZuuposOS Kernel v0.5.2 booting...  ║");
     info!("╚══════════════════════════════════════╝");
 
     // 2. Initialize x86-64 CPU structures: GDT, IDT, TSS
@@ -63,19 +66,21 @@ pub extern "C" fn _start(boot_info: *const arch::x86_64::boot_info::BootInfo) ->
     drivers::nvme::init();
     info!("[nvme] NVMe driver initialized");
 
-    // 9. Enable hardware interrupts
+    // 9. Initialize capability-based IPC
+    ipc::init();
+    info!("[ipc] Capability IPC subsystem initialized");
+
+    // 10. Enable hardware interrupts
     x86_64::instructions::interrupts::enable();
     info!("[irq] Interrupts enabled");
 
-    // 10. Initialize scheduler
+    // 11. Initialize scheduler
     sched::init();
     info!("[sched] Scheduler initialized");
 
-    // 11. Spawn agentd as PID 1 — the AI agent daemon
-    //     In Phase 1.5, this will load and run the agentd ELF.
-    //     For now, we enter a stub agent loop.
-    info!("[kernel] Handing control to zuupos-agentd (PID 1)...");
-    sched::spawn_init_process();
+    // 12. Spawn initial process from initramfs (PID 1)
+    info!("[kernel] Launching initial process from initramfs...");
+    sched::spawn_init_from_initramfs(boot_info);
 
     // Kernel idle loop — never returns
     loop {

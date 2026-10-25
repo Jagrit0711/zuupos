@@ -82,12 +82,45 @@ pub fn handle(
             framebuffer::put_pixel(arg0 as u32, arg1 as u32, arg2 as u32);
             0
         }
-        SYS_IPC_SEND => 0,
-        SYS_IPC_RECV => 0,
+        SYS_IPC_SEND => {
+            handle_ipc_send(arg0, arg1, arg2)
+        }
+        SYS_IPC_RECV => {
+            handle_ipc_recv(arg0, arg1, arg2)
+        }
         _ => {
             log::warn!("[syscall] Unknown syscall: {}", num);
             u64::MAX
         }
+    }
+}
+
+fn handle_ipc_send(channel_id: u64, buf_ptr: u64, len: u64) -> u64 {
+    if len > 4096 || buf_ptr == 0 {
+        return u64::MAX;
+    }
+    let slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, len as usize) };
+    let vec = alloc::vec::Vec::from(slice);
+    match crate::ipc::send_message(channel_id, vec) {
+        Ok(()) => len,
+        Err(_) => u64::MAX,
+    }
+}
+
+fn handle_ipc_recv(channel_id: u64, buf_ptr: u64, max_len: u64) -> u64 {
+    if max_len == 0 || buf_ptr == 0 {
+        return u64::MAX;
+    }
+    match crate::ipc::recv_message(channel_id) {
+        Ok(Some(msg)) => {
+            let copy_len = msg.payload.len().min(max_len as usize);
+            unsafe {
+                core::ptr::copy_nonoverlapping(msg.payload.as_ptr(), buf_ptr as *mut u8, copy_len);
+            }
+            copy_len as u64
+        }
+        Ok(None) => 0, // No message available
+        Err(_) => u64::MAX,
     }
 }
 

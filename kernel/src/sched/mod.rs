@@ -257,6 +257,47 @@ pub fn spawn_init_process() {
     spawn_process(entry, user_stack, PhysAddr::new(page_table));
 }
 
+/// Spawns the initial userspace process by extracting and loading the ELF from initramfs.
+pub fn spawn_init_from_initramfs(boot_info: &crate::arch::x86_64::boot_info::BootInfo) {
+    if boot_info.initramfs_size > 0 && boot_info.initramfs_phys_start > 0 {
+        log::info!(
+            "[sched] Examining initramfs @ {:#x} ({} bytes)",
+            boot_info.initramfs_phys_start,
+            boot_info.initramfs_size
+        );
+
+        let initrd_virt = crate::mm::virt::phys_to_virt(boot_info.initramfs_phys_start);
+        let archive = unsafe {
+            core::slice::from_raw_parts(initrd_virt as *const u8, boot_info.initramfs_size as usize)
+        };
+
+        // Look for userspace binary: bin/hello or init
+        let maybe_binary = crate::initramfs::find_file(archive, "bin/hello")
+            .or_else(|| crate::initramfs::find_file(archive, "init"));
+
+        if let Some(elf_data) = maybe_binary {
+            log::info!("[sched] Found userspace binary in initramfs ({} bytes)", elf_data.len());
+            match crate::loader::load_elf(elf_data) {
+                Ok(loaded) => {
+                    let pid = spawn_process(loaded.entry_point, loaded.user_stack, loaded.page_table);
+                    log::info!("[sched] Successfully launched PID {} from initramfs", pid);
+                    return;
+                }
+                Err(e) => {
+                    log::error!("[sched] Failed to load initramfs ELF: {}", e);
+                }
+            }
+        } else {
+            log::warn!("[sched] No bin/hello found in initramfs, falling back to stub");
+        }
+    } else {
+        log::info!("[sched] No initramfs provided by bootloader");
+    }
+
+    // Fallback to stub
+    spawn_init_process();
+}
+
 pub fn yield_now() {
     schedule();
 }
