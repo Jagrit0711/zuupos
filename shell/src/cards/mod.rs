@@ -11,6 +11,8 @@ pub enum CardType {
     Weather,
     Metric,
     Plan,
+    Booking,
+    Gallery,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -24,6 +26,23 @@ impl CardAction {
         Self {
             label: label.to_string(),
             action_id: action_id.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct CardDetailRow {
+    pub icon: String,   // "calendar", "bed", "location", "card"
+    pub label: String,  // e.g. "Nov 12 - Nov 16"
+    pub value: String,  // e.g. "4 Nights"
+}
+
+impl CardDetailRow {
+    pub fn new(icon: &str, label: &str, value: &str) -> Self {
+        Self {
+            icon: icon.to_string(),
+            label: label.to_string(),
+            value: value.to_string(),
         }
     }
 }
@@ -46,6 +65,77 @@ pub struct Card {
     pub minimized: bool,
     #[serde(default)]
     pub actions: Vec<CardAction>,
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    #[serde(default)]
+    pub status_badge: Option<String>,
+    #[serde(default)]
+    pub detail_rows: Vec<CardDetailRow>,
+    #[serde(default)]
+    pub gallery_images: Vec<String>,
+    #[serde(default)]
+    pub pos_x: Option<i32>,
+    #[serde(default)]
+    pub pos_y: Option<i32>,
+    #[serde(default)]
+    pub custom_width: Option<u32>,
+    #[serde(default)]
+    pub custom_height: Option<u32>,
+}
+
+impl Card {
+    pub fn new_booking(
+        title: &str,
+        subtitle: &str,
+        status_badge: &str,
+        details: Vec<CardDetailRow>,
+    ) -> Self {
+        Self {
+            id: 0,
+            title: title.to_string(),
+            body: String::new(),
+            card_type: CardType::Booking,
+            age_ticks: 0,
+            max_age: 10000,
+            app_id: None,
+            kind: Some("booking".to_string()),
+            focused: false,
+            minimized: false,
+            actions: Vec::new(),
+            subtitle: Some(subtitle.to_string()),
+            status_badge: Some(status_badge.to_string()),
+            detail_rows: details,
+            gallery_images: Vec::new(),
+            pos_x: None,
+            pos_y: None,
+            custom_width: Some(330),
+            custom_height: Some(255),
+        }
+    }
+
+    pub fn new_gallery(title: &str, images: Vec<String>) -> Self {
+        Self {
+            id: 0,
+            title: title.to_string(),
+            body: String::new(),
+            card_type: CardType::Gallery,
+            age_ticks: 0,
+            max_age: 10000,
+            app_id: None,
+            kind: Some("gallery".to_string()),
+            focused: false,
+            minimized: false,
+            actions: Vec::new(),
+            subtitle: None,
+            status_badge: None,
+            detail_rows: Vec::new(),
+            gallery_images: images,
+            pos_x: None,
+            pos_y: None,
+            custom_width: Some(440),
+            custom_height: Some(435),
+        }
+    }
 }
 
 impl Default for Card {
@@ -62,6 +152,14 @@ impl Default for Card {
             focused: false,
             minimized: false,
             actions: Vec::new(),
+            subtitle: None,
+            status_badge: None,
+            detail_rows: Vec::new(),
+            gallery_images: Vec::new(),
+            pos_x: None,
+            pos_y: None,
+            custom_width: None,
+            custom_height: None,
         }
     }
 }

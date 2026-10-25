@@ -26,9 +26,10 @@ chrono = { version = "0.4", features = ["clock"] }
 # Logging
 log = "0.4"
 env_logger = "0.11"
-# Rand (for particle effects)
+# Rand (for particle effects and roaming)
 rand = { version = "0.8", features = ["small_rng"] }
+# Image decoding for visual gallery cards
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [dev-dependencies]
-# PNG export for the offline avatar/HUD preview tool (examples/avatar_preview.rs)
-image = { version = "0.25", default-features = false, features = ["png"] }
+

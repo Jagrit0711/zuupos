@@ -18,6 +18,7 @@ use fontdue::{Font, FontSettings};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use softbuffer::{Context, Surface};
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use winit::window::Window;
@@ -60,6 +61,10 @@ pub struct Renderer {
     pub metrics: Option<SystemMetrics>,
     /// Waveform buffer for Speaking animation (32 samples)
     waveform: Vec<f32>,
+    /// Current theme mode (Light/Taby Ethereal or Dark)
+    pub theme_mode: ThemeMode,
+    /// Cached decoded image tiles for cards
+    image_cache: HashMap<String, image::RgbaImage>,
 }
 
 impl Renderer {
@@ -137,6 +142,8 @@ impl Renderer {
             plan_steps: Vec::new(),
             metrics: None,
             waveform,
+            theme_mode: ThemeMode::Light,
+            image_cache: HashMap::new(),
         }
     }
 
@@ -162,11 +169,19 @@ impl Renderer {
         self.draw_background(tick);
         self.update_particles(tick);
         self.draw_particles();
-        self.draw_statusbar(tick, avatar);
-        self.draw_plan_panel(tick);
+
+        if self.theme_mode == ThemeMode::Dark {
+            self.draw_statusbar(tick, avatar);
+            self.draw_plan_panel(tick);
+            self.draw_voice_dock(tick, avatar);
+        }
+
         self.draw_cards(cards, tick);
         self.draw_avatar(avatar, tick);
-        self.draw_voice_dock(tick, avatar);
+
+        if self.theme_mode == ThemeMode::Light {
+            self.draw_pill_dock(tick, avatar);
+        }
 
         if in_boot {
             self.draw_boot_overlay(tick);
@@ -180,7 +195,53 @@ impl Renderer {
     fn draw_background(&mut self, tick: u64) {
         let w = self.width;
         let h = self.height;
-        let t = tick as f32 * 0.006;
+        let t = tick as f32 * 0.005;
+
+        if self.theme_mode == ThemeMode::Light {
+            // Ethereal Taby Light Mode Pastel Gradient Mesh:
+            // Pale mint/sage on top-left, soft lilac on center-right, luminous mist everywhere
+            let cx_mint = (0.18 + (t * 0.3).sin() * 0.04) * w as f32;
+            let cy_mint = (0.30 + (t * 0.25).cos() * 0.04) * h as f32;
+
+            let cx_lilac = (0.75 + (t * 0.25).cos() * 0.04) * w as f32;
+            let cy_lilac = (0.50 + (t * 0.35).sin() * 0.04) * h as f32;
+
+            let cx_cream = (0.45 + (t * 0.4).sin() * 0.03) * w as f32;
+            let cy_cream = (0.82 + (t * 0.2).cos() * 0.03) * h as f32;
+
+            for y in 0..h {
+                for x in 0..w {
+                    let fx = x as f32;
+                    let fy = y as f32;
+
+                    let d_mint = (((fx - cx_mint).powi(2) + (fy - cy_mint).powi(2)).sqrt() / (w as f32 * 0.85)).min(1.0);
+                    let d_lilac = (((fx - cx_lilac).powi(2) + (fy - cy_lilac).powi(2)).sqrt() / (w as f32 * 0.80)).min(1.0);
+                    let d_cream = (((fx - cx_cream).powi(2) + (fy - cy_cream).powi(2)).sqrt() / (w as f32 * 0.70)).min(1.0);
+
+                    let p_mint = (1.0 - d_mint).max(0.0).powf(1.8);
+                    let p_lilac = (1.0 - d_lilac).max(0.0).powf(2.0);
+                    let p_cream = (1.0 - d_cream).max(0.0).powf(2.2);
+
+                    let nx = (x % 512) as usize;
+                    let ny = (y % 512) as usize;
+                    let nv = (self.noise[ny * 512 + nx] as f32 / 255.0 - 0.5) * 0.006;
+
+                    // Base: #f7faf9
+                    // Mint glow: #e2f1ea
+                    // Lilac blush: #eee7f7
+                    let r = (0.968 - p_mint * 0.075 - p_lilac * 0.025 + p_cream * 0.01 + nv).clamp(0.0, 1.0);
+                    let g = (0.980 - p_mint * 0.025 - p_lilac * 0.065 - p_cream * 0.015 + nv).clamp(0.0, 1.0);
+                    let b = (0.976 - p_mint * 0.055 + p_lilac * 0.015 - p_cream * 0.01 + nv).clamp(0.0, 1.0);
+
+                    let ir = (r * 255.0) as u32;
+                    let ig = (g * 255.0) as u32;
+                    let ib = (b * 255.0) as u32;
+
+                    self.buf[(y * w + x) as usize] = (ir << 16) | (ig << 8) | ib;
+                }
+            }
+            return;
+        }
 
         // Three animated radial gradient centers
         let cx1 = (0.25 + (t * 0.7).sin() * 0.12) * w as f32;
@@ -270,10 +331,12 @@ impl Renderer {
             if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
                 continue;
             }
+            let p_col = if self.theme_mode == ThemeMode::Light { 0xbac8e2 } else { p.color };
+            let p_alpha = if self.theme_mode == ThemeMode::Light { alpha * 0.25 } else { alpha };
             let idx = (py as u32 * w + px as u32) as usize;
             if idx < self.buf.len() {
                 self.buf[idx] =
-                    blend_pixel(self.buf[idx], p.color, alpha * (p.size / 3.0).min(1.0));
+                    blend_pixel(self.buf[idx], p_col, p_alpha * (p.size / 3.0).min(1.0));
             }
             // Draw a small soft dot (radius 1)
             if p.size > 1.5 {
@@ -287,8 +350,8 @@ impl Renderer {
                         let ni = (ny as u32 * w + nx as u32) as usize;
                         if ni < self.buf.len() {
                             let dist_a =
-                                alpha * 0.35 * (1.0 - ((dx * dx + dy * dy) as f32).sqrt() * 0.5);
-                            self.buf[ni] = blend_pixel(self.buf[ni], p.color, dist_a.max(0.0));
+                                p_alpha * 0.35 * (1.0 - ((dx * dx + dy * dy) as f32).sqrt() * 0.5);
+                            self.buf[ni] = blend_pixel(self.buf[ni], p_col, dist_a.max(0.0));
                         }
                     }
                 }
@@ -452,7 +515,12 @@ impl Renderer {
 
     // ── Cards ─────────────────────────────────────────────────────────────────
 
-    fn draw_cards(&mut self, cards: &[&Card], _tick: u64) {
+    fn draw_cards(&mut self, cards: &[&Card], tick: u64) {
+        if self.theme_mode == ThemeMode::Light {
+            self.draw_cards_light(cards, tick);
+            return;
+        }
+
         let card_w: u32 = 340;
         let margin: u32 = 16;
         let start_x = self.width.saturating_sub(card_w + margin);
@@ -497,6 +565,8 @@ impl Renderer {
                 CardType::Weather => (CARD_BG_WEATHER, ACCENT_CYAN),
                 CardType::Metric => (CARD_BG_METRIC, ACCENT_AMBER),
                 CardType::Plan => (CARD_BG_PLAN, ACCENT_GREEN),
+                CardType::Booking => (0x121e18, ACCENT_GREEN),
+                CardType::Gallery => (0x151824, ACCENT_BLUE),
             };
 
             let bg_alpha = if card.focused { 0.94 } else { 0.78 } * fade;
@@ -658,6 +728,98 @@ impl Renderer {
         }
     }
 
+    fn draw_cards_light(&mut self, cards: &[&Card], _tick: u64) {
+        let mut curr_y = 140u32;
+        let default_x = self.width.saturating_sub(380);
+
+        for card in cards.iter() {
+            let is_booking = card.card_type == CardType::Booking;
+            let is_gallery = card.card_type == CardType::Gallery;
+
+            let card_w = card.custom_width.unwrap_or(if is_gallery { 440 } else { 330 });
+            let card_h = card.custom_height.unwrap_or(if is_gallery { 430 } else if is_booking { 255 } else { 120 });
+            let radius = 26.0f32;
+
+            let x = card.pos_x.map(|px| px as u32).unwrap_or(default_x);
+            let y = card.pos_y.map(|py| py as u32).unwrap_or(curr_y);
+
+            // Diffuse drop shadow
+            self.draw_card_shadow(x, y, card_w, card_h, radius, 22, 0.08);
+
+            // Pure white floating card body
+            self.fill_rounded_rect(x, y, card_w, card_h, radius, 0xffffff, 0.98, Some(0xe8edf5));
+
+            if is_booking {
+                // Top status badge: (✓) BOOKING FINALIZED
+                let badge = card.status_badge.as_deref().unwrap_or("BOOKING FINALIZED");
+                self.draw_check_badge(x + 26, y + 26, badge);
+
+                // Hotel Name
+                self.draw_text(&card.title, (x + 26) as i32, (y + 56) as i32, 21.0, 0x181a1f, true);
+
+                // Location Subtitle: 📍 1 Ogocho, Kita Ward
+                if let Some(sub) = &card.subtitle {
+                    self.draw_pin_icon(x + 26, y + 88, 0x94a3b8);
+                    self.draw_text(sub, (x + 44) as i32, (y + 86) as i32, 12.0, 0x64748b, false);
+                }
+
+                // Detail rows (Dates & Guests)
+                for (i, row) in card.detail_rows.iter().enumerate() {
+                    let row_y = y + 132 + (i as u32 * 46);
+                    if row.icon == "calendar" {
+                        self.draw_calendar_icon(x + 26, row_y + 1, 0x64748b);
+                    } else if row.icon == "bed" {
+                        self.draw_bed_icon(x + 26, row_y + 2, 0x64748b);
+                    }
+                    self.draw_text(&row.label, (x + 50) as i32, row_y as i32, 12.0, 0x1e293b, true);
+                    self.draw_text(&row.value, (x + card_w - 76) as i32, row_y as i32, 11.5, 0x64748b, false);
+                }
+            } else if is_gallery {
+                // Header: Visual References Collected
+                self.draw_text(&card.title, (x + 26) as i32, (y + 24) as i32, 13.5, 0x374151, true);
+
+                // 2-column image tile grid
+                let tile_w = 188u32;
+                let tile_h = 112u32;
+                let gap_x = 14u32;
+                let gap_y = 12u32;
+                let grid_x = x + 24;
+                let grid_y = y + 54;
+
+                for (idx, img_path) in card.gallery_images.iter().enumerate() {
+                    let col = (idx % 2) as u32;
+                    let row = (idx / 2) as u32;
+                    let img_x = grid_x + col * (tile_w + gap_x);
+                    let img_y = grid_y + row * (tile_h + gap_y);
+                    if img_y + tile_h <= y + card_h - 12 {
+                        self.fill_rounded_rect(img_x, img_y, tile_w, tile_h, 14.0, 0xe2e8f0, 1.0, None);
+                        self.blit_image_rounded(img_path, img_x, img_y, tile_w, tile_h, 14.0);
+                    }
+                }
+            } else {
+                // Generic Card in Light Mode
+                let mut title_x = x + 20;
+                if let Some(ref app) = card.app_id {
+                    let badge_text = app.to_uppercase();
+                    let badge_w = (badge_text.len() as u32 * 6).max(36) + 8;
+                    self.fill_rounded_rect(title_x, y + 14, badge_w, 16, 4.0, 0xedf2f7, 1.0, None);
+                    self.draw_text(&badge_text, (title_x + 4) as i32, (y + 16) as i32, 8.5, 0x4a5568, true);
+                    title_x += badge_w + 8;
+                }
+                self.draw_text(&card.title, title_x as i32, (y + 16) as i32, 12.0, 0x1a202c, true);
+
+                let body_lines = wrap_text(&card.body, 36);
+                for (li, line) in body_lines.iter().enumerate().take(3) {
+                    self.draw_text(line, (x + 20) as i32, (y + 44 + li as u32 * 18) as i32, 10.0, 0x4a5568, false);
+                }
+            }
+
+            if card.pos_x.is_none() || card.pos_y.is_none() {
+                curr_y += card_h + 16;
+            }
+        }
+    }
+
     // ── Avatar ───────────────────────────────────────────────────────────────
 
     /// Renders ZuuposOS's "buddy" character — a soft, lit orb creature with a
@@ -666,6 +828,11 @@ impl Renderer {
     /// primitives (`fill_circle_aa`/`fill_ellipse_aa`) so it reads as a
     /// character at a glance rather than pixel-art placeholder geometry.
     fn draw_avatar(&mut self, avatar: &Avatar, tick: u64) {
+        if self.theme_mode == ThemeMode::Light {
+            self.draw_avatar_light(avatar, tick);
+            return;
+        }
+
         let size = 96.0f32;
         let r = size / 2.0;
         // The character roams (see Avatar::tick) instead of sitting fixed in
@@ -821,6 +988,72 @@ impl Renderer {
         }
     }
 
+    fn draw_avatar_light(&mut self, avatar: &Avatar, tick: u64) {
+        let (base_cx, base_cy) = avatar.position();
+        let breathe = (tick as f32 * 0.04).sin() * 2.2;
+        let cx = if base_cx > 10.0 { base_cx } else { self.width as f32 * 0.52 };
+        let cy = if base_cy > 10.0 { base_cy + breathe } else { self.height as f32 * 0.48 + breathe };
+
+        let r = 52.0f32;
+
+        // 1. Soft ethereal outer glow
+        self.fill_circle_aa(cx, cy, r + 28.0, 0xd0d8fa, 0.16);
+        self.fill_circle_aa(cx, cy, r + 16.0, 0xdcd0fa, 0.26);
+        self.fill_circle_aa(cx, cy, r + 8.0,  0xe4d6fc, 0.38);
+
+        // 2. Diffuse drop shadow under orb
+        self.fill_ellipse_aa(cx + 6.0, cy + r - 2.0, r * 0.85, 14.0, 0xa6b2d4, 0.22);
+
+        // 3. Smooth iridescent pearl sphere using radial shading
+        let x0 = (cx - r - 1.0).max(0.0) as u32;
+        let x1 = (cx + r + 2.0).min(self.width as f32) as u32;
+        let y0 = (cy - r - 1.0).max(0.0) as u32;
+        let y1 = (cy + r + 2.0).min(self.height as f32) as u32;
+
+        let hx = cx - r * 0.32;
+        let hy = cy - r * 0.35;
+
+        let bx = cx + r * 0.28;
+        let by = cy + r * 0.32;
+
+        for py in y0..y1 {
+            for px in x0..x1 {
+                let dx = px as f32 + 0.5 - cx;
+                let dy = py as f32 + 0.5 - cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > r {
+                    if dist <= r + 1.0 {
+                        let edge_cov = (r + 1.0 - dist).clamp(0.0, 1.0);
+                        let idx = (py * self.width + px) as usize;
+                        self.buf[idx] = blend_pixel(self.buf[idx], 0xcfd6fa, edge_cov * 0.7);
+                    }
+                    continue;
+                }
+
+                let d_hl = (((px as f32 - hx).powi(2) + (py as f32 - hy).powi(2)).sqrt() / (r * 1.35)).min(1.0);
+                let d_bl = (((px as f32 - bx).powi(2) + (py as f32 - by).powi(2)).sqrt() / (r * 1.4)).min(1.0);
+
+                let p_hl = (1.0 - d_hl).max(0.0).powf(1.6);
+                let p_bl = (1.0 - d_bl).max(0.0).powf(1.8);
+
+                let red   = (0.78 + p_hl * 0.20 + p_bl * 0.08).clamp(0.0, 1.0);
+                let green = (0.80 + p_hl * 0.19 - p_bl * 0.05).clamp(0.0, 1.0);
+                let blue  = (0.97 + p_hl * 0.03 + p_bl * 0.01).clamp(0.0, 1.0);
+
+                let col = (((red * 255.0) as u32) << 16) | (((green * 255.0) as u32) << 8) | ((blue * 255.0) as u32);
+                let idx = (py * self.width + px) as usize;
+                self.buf[idx] = blend_pixel(self.buf[idx], col, 0.95);
+            }
+        }
+
+        // 4. Speech bubble
+        if let Some(speech) = avatar.speech() {
+            let bx = cx + r * 0.65;
+            let by = cy - 42.0;
+            self.draw_speech_bubble(bx, by, speech);
+        }
+    }
+
     fn draw_waveform_mouth(&mut self, cx: f32, cy: f32, _size: u32, _tick: u64) {
         let base_y = cy + 15.0;
         let samples = self.waveform.len();
@@ -943,6 +1176,333 @@ impl Renderer {
             .collect();
         let dots_color = blend(BG_BASE, ACCENT_PRIMARY, alpha * 0.7);
         self.draw_text(&dot_str, cx + 60, cy + 76, 13.0, dots_color, false);
+    }
+
+    // ── Modern Floating Primitives & Vector Icons ────────────────────────────
+
+    pub fn load_image(&mut self, path: &str) {
+        if !self.image_cache.contains_key(path) {
+            if let Ok(img) = image::open(path) {
+                self.image_cache.insert(path.to_string(), img.to_rgba8());
+            }
+        }
+    }
+
+    pub fn blit_image_rounded(
+        &mut self,
+        path: &str,
+        dst_x: u32,
+        dst_y: u32,
+        dst_w: u32,
+        dst_h: u32,
+        radius: f32,
+    ) {
+        self.load_image(path);
+        let Some(img) = self.image_cache.get(path) else { return };
+        let (src_w, src_h) = img.dimensions();
+        if src_w == 0 || src_h == 0 { return; }
+
+        for py in 0..dst_h {
+            let screen_y = dst_y + py;
+            if screen_y >= self.height { break; }
+            let sy = (py as f32 / dst_h as f32 * src_h as f32) as u32;
+
+            for px in 0..dst_w {
+                let screen_x = dst_x + px;
+                if screen_x >= self.width { break; }
+
+                let corner_dist = if (px as f32) < radius && (py as f32) < radius {
+                    let dx = radius - px as f32;
+                    let dy = radius - py as f32;
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else if (px as f32) > (dst_w as f32 - radius) && (py as f32) < radius {
+                    let dx = px as f32 - (dst_w as f32 - radius);
+                    let dy = radius - py as f32;
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else if (px as f32) < radius && (py as f32) > (dst_h as f32 - radius) {
+                    let dx = radius - px as f32;
+                    let dy = py as f32 - (dst_h as f32 - radius);
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else if (px as f32) > (dst_w as f32 - radius) && (py as f32) > (dst_h as f32 - radius) {
+                    let dx = px as f32 - (dst_w as f32 - radius);
+                    let dy = py as f32 - (dst_h as f32 - radius);
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else {
+                    -1.0
+                };
+
+                if corner_dist > 1.0 {
+                    continue;
+                }
+
+                let alpha_edge = if corner_dist > 0.0 {
+                    (1.0 - corner_dist).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+
+                let sx = (px as f32 / dst_w as f32 * src_w as f32) as u32;
+                let p = img.get_pixel(sx.min(src_w - 1), sy.min(src_h - 1));
+                let col = ((p[0] as u32) << 16) | ((p[1] as u32) << 8) | (p[2] as u32);
+                let alpha = (p[3] as f32 / 255.0) * alpha_edge;
+
+                let idx = (screen_y * self.width + screen_x) as usize;
+                self.buf[idx] = blend_pixel(self.buf[idx], col, alpha);
+            }
+        }
+    }
+
+    pub fn draw_card_shadow(&mut self, x: u32, y: u32, w: u32, h: u32, radius: f32, blur: u32, max_alpha: f32) {
+        let x_min = x.saturating_sub(blur);
+        let x_max = (x + w + blur).min(self.width);
+        let y_min = (y + 4).saturating_sub(blur);
+        let y_max = (y + h + 10 + blur).min(self.height);
+
+        let shadow_color = 0x121b28;
+        let cx = x as f32 + w as f32 * 0.5;
+        let cy = (y + 6) as f32 + h as f32 * 0.5;
+        let half_w = (w as f32 * 0.5) - radius;
+        let half_h = (h as f32 * 0.5) - radius;
+
+        for sy in y_min..y_max {
+            let py = (sy as f32 + 0.5 - cy).abs() - half_h;
+            for sx in x_min..x_max {
+                let px = (sx as f32 + 0.5 - cx).abs() - half_w;
+
+                let dist = if px > 0.0 && py > 0.0 {
+                    (px * px + py * py).sqrt() - radius
+                } else {
+                    px.max(py) - radius
+                };
+
+                if dist < blur as f32 {
+                    let d_clamped = dist.max(0.0);
+                    let falloff = 1.0 - (d_clamped / blur as f32);
+                    let alpha = max_alpha * falloff * falloff;
+                    let idx = (sy * self.width + sx) as usize;
+                    self.buf[idx] = blend_pixel(self.buf[idx], shadow_color, alpha);
+                }
+            }
+        }
+    }
+
+    pub fn fill_rounded_rect(
+        &mut self,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        radius: f32,
+        bg_col: u32,
+        alpha: f32,
+        border_col: Option<u32>,
+    ) {
+        let y_max = (y + h).min(self.height);
+        let x_max = (x + w).min(self.width);
+
+        for py in y..y_max {
+            let rel_y = (py - y) as f32;
+            for px in x..x_max {
+                let rel_x = (px - x) as f32;
+
+                let is_corner_zone = (rel_x < radius || rel_x > (w as f32 - radius))
+                    && (rel_y < radius || rel_y > (h as f32 - radius));
+
+                let corner_dist = if rel_x < radius && rel_y < radius {
+                    let dx = radius - rel_x;
+                    let dy = radius - rel_y;
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else if rel_x > (w as f32 - radius) && rel_y < radius {
+                    let dx = rel_x - (w as f32 - radius);
+                    let dy = radius - rel_y;
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else if rel_x < radius && rel_y > (h as f32 - radius) {
+                    let dx = radius - rel_x;
+                    let dy = rel_y - (h as f32 - radius);
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else if rel_x > (w as f32 - radius) && rel_y > (h as f32 - radius) {
+                    let dx = rel_x - (w as f32 - radius);
+                    let dy = rel_y - (h as f32 - radius);
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else {
+                    -10.0
+                };
+
+                if corner_dist > 1.0 {
+                    continue;
+                }
+
+                let a = if corner_dist > 0.0 {
+                    (1.0 - corner_dist) * alpha
+                } else {
+                    alpha
+                };
+
+                let is_border = if border_col.is_some() {
+                    if is_corner_zone {
+                        corner_dist >= -1.2
+                    } else {
+                        rel_x < 1.0 || rel_x >= (w as f32 - 1.0) || rel_y < 1.0 || rel_y >= (h as f32 - 1.0)
+                    }
+                } else {
+                    false
+                };
+
+                let col = if is_border {
+                    border_col.unwrap()
+                } else {
+                    bg_col
+                };
+
+                let idx = (py * self.width + px) as usize;
+                self.buf[idx] = blend_pixel(self.buf[idx], col, a);
+            }
+        }
+    }
+
+    fn draw_check_badge(&mut self, x: u32, y: u32, text: &str) {
+        let cx = x + 7;
+        let cy = y + 7;
+        self.fill_circle(cx, cy, 7, 0x10b981);
+        self.fill_circle(cx, cy, 6, 0xffffff);
+        self.fill_rect(cx - 3, cy, 2, 2, 0x10b981);
+        self.fill_rect(cx - 1, cy + 1, 2, 2, 0x10b981);
+        self.fill_rect(cx + 1, cy - 1, 2, 3, 0x10b981);
+        self.fill_rect(cx + 2, cy - 3, 2, 3, 0x10b981);
+
+        self.draw_text(text, (x + 20) as i32, (y + 1) as i32, 9.5, 0x059669, true);
+    }
+
+    fn draw_pin_icon(&mut self, x: u32, y: u32, col: u32) {
+        let cx = x + 5;
+        let cy = y + 5;
+        self.fill_circle(cx, cy, 4, col);
+        self.fill_circle(cx, cy, 2, 0xffffff);
+        self.fill_rect(cx - 1, cy + 3, 3, 2, col);
+        self.fill_rect(cx, cy + 5, 1, 2, col);
+    }
+
+    fn draw_calendar_icon(&mut self, x: u32, y: u32, col: u32) {
+        self.fill_rect(x, y + 2, 13, 12, col);
+        self.fill_rect(x + 1, y + 5, 11, 8, 0xffffff);
+        self.fill_rect(x + 2, y, 2, 3, col);
+        self.fill_rect(x + 9, y, 2, 3, col);
+        self.fill_rect(x + 3, y + 7, 2, 2, col);
+        self.fill_rect(x + 8, y + 7, 2, 2, col);
+        self.fill_rect(x + 3, y + 10, 2, 2, col);
+        self.fill_rect(x + 8, y + 10, 2, 2, col);
+    }
+
+    fn draw_bed_icon(&mut self, x: u32, y: u32, col: u32) {
+        self.fill_rect(x, y + 2, 2, 9, col);
+        self.fill_rect(x + 2, y + 5, 12, 5, col);
+        self.fill_rect(x + 3, y + 3, 4, 3, col);
+        self.fill_rect(x + 13, y + 7, 1, 4, col);
+    }
+
+    fn draw_wifi_icon(&mut self, cx: u32, cy: u32, col: u32) {
+        let r3 = 7.0f32;
+        let r2 = 4.5f32;
+        for deg in 45..=135 {
+            let rad = (deg as f32).to_radians();
+            let px = (cx as f32 + rad.cos() * r3) as u32;
+            let py = (cy as f32 - rad.sin() * r3) as u32;
+            if px < self.width && py < self.height { self.buf[(py * self.width + px) as usize] = col; }
+            let px2 = (cx as f32 + rad.cos() * r2) as u32;
+            let py2 = (cy as f32 - rad.sin() * r2) as u32;
+            if px2 < self.width && py2 < self.height { self.buf[(py2 * self.width + px2) as usize] = col; }
+        }
+        self.fill_circle(cx, cy + 2, 1, col);
+    }
+
+    fn draw_cam_icon(&mut self, cx: u32, cy: u32, col: u32) {
+        let x = cx - 7;
+        let y = cy - 4;
+        self.fill_rect(x, y, 11, 9, col);
+        self.fill_rect(x + 1, y + 1, 9, 7, 0xffffff);
+        self.fill_circle(cx - 2, cy, 2, col);
+        for i in 0..4 {
+            let px = cx + 4 + i;
+            let h = i as i32;
+            for dy in -h..=h {
+                let py = (cy as i32 + dy) as u32;
+                if px < self.width && py < self.height { self.buf[(py * self.width + px) as usize] = col; }
+            }
+        }
+    }
+
+    fn draw_mic_icon(&mut self, cx: u32, cy: u32, col: u32) {
+        self.fill_rect(cx - 2, cy - 7, 5, 8, col);
+        for dx in -4i32..=4 {
+            let dy = 2 + (dx * dx) / 6;
+            let px = (cx as i32 + dx) as u32;
+            let py = (cy as i32 + dy) as u32;
+            if px < self.width && py < self.height { self.buf[(py * self.width + px) as usize] = col; }
+        }
+        self.fill_rect(cx, cy + 4, 1, 4, col);
+        self.fill_rect(cx - 3, cy + 8, 7, 1, col);
+    }
+
+    fn draw_speech_bubble(&mut self, x: f32, y: f32, text: &str) {
+        let bw = 245u32;
+        let bh = 94u32;
+        let bx = x as u32;
+        let by = y as u32;
+        let radius = 18.0f32;
+
+        self.draw_card_shadow(bx, by, bw, bh, radius, 14, 0.08);
+        self.fill_rounded_rect(bx, by, bw, bh, radius, 0xffffff, 0.88, Some(0xe6ebf2));
+
+        // Pointer notch pointing left toward the orb
+        let tip_x = bx.saturating_sub(10);
+        let tip_y = by + 44;
+        for i in 0..10 {
+            let col_x = tip_x + i;
+            let half_h = (i as f32 * 0.95) as i32;
+            for dy in -half_h..=half_h {
+                let py = (tip_y as i32 + dy) as u32;
+                if col_x < self.width && py < self.height {
+                    let idx = (py * self.width + col_x) as usize;
+                    let is_notch_border = dy == -half_h || dy == half_h || i == 0;
+                    let col = if is_notch_border { 0xe6ebf2 } else { 0xffffff };
+                    self.buf[idx] = blend_pixel(self.buf[idx], col, 0.92);
+                }
+            }
+        }
+
+        let lines: Vec<&str> = text.split('\n').collect();
+        let mut cur_y = by + 18;
+        for (i, line) in lines.iter().enumerate() {
+            let is_last = i == lines.len() - 1 && lines.len() > 1;
+            let wrapped = wrap_text(line, 30);
+            for wline in wrapped {
+                let col = if is_last { 0x181a1f } else { 0x505765 };
+                self.draw_text(&wline, (bx + 16) as i32, cur_y as i32, if is_last { 10.5 } else { 10.0 }, col, is_last);
+                cur_y += 18;
+            }
+        }
+    }
+
+    fn draw_pill_dock(&mut self, _tick: u64, _avatar: &Avatar) {
+        let dock_w = 248u32;
+        let dock_h = 48u32;
+        let dock_x = (self.width.saturating_sub(dock_w)) / 2;
+        let dock_y = self.height.saturating_sub(68);
+        let radius = 24.0f32;
+
+        self.draw_card_shadow(dock_x, dock_y, dock_w, dock_h, radius, 16, 0.07);
+        self.fill_rounded_rect(dock_x, dock_y, dock_w, dock_h, radius, 0xffffff, 0.96, Some(0xe4e8f0));
+
+        self.draw_text("12:15 AM", (dock_x + 22) as i32, (dock_y + 17) as i32, 11.5, 0x1a1d24, true);
+        self.fill_rect(dock_x + 88, dock_y + 15, 1, 18, 0xe4e8f0);
+
+        self.draw_wifi_icon(dock_x + 112, dock_y + 24, 0x647082);
+        self.draw_cam_icon(dock_x + 142, dock_y + 24, 0x647082);
+
+        let mic_cx = dock_x + dock_w - 26;
+        let mic_cy = dock_y + 24;
+        self.fill_circle(mic_cx, mic_cy, 16, 0xebf1ff);
+        self.draw_mic_icon(mic_cx, mic_cy, 0x5164f5);
     }
 
     // ── Drawing Primitives ────────────────────────────────────────────────────

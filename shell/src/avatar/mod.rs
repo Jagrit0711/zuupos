@@ -33,6 +33,7 @@ pub struct Avatar {
     next_wander: u64,
     rng: SmallRng,
     placed: bool,
+    speech_text: Option<String>,
 }
 
 impl Default for Avatar {
@@ -56,7 +57,24 @@ impl Avatar {
             next_wander: 200,
             rng: SmallRng::seed_from_u64(0xA11A7E),
             placed: false,
+            speech_text: None,
         }
+    }
+
+    pub fn set_speech(&mut self, text: Option<&str>) {
+        self.speech_text = text.map(|s| s.to_string());
+    }
+
+    pub fn speech(&self) -> Option<&str> {
+        self.speech_text.as_deref()
+    }
+
+    pub fn set_position(&mut self, x: f32, y: f32) {
+        self.pos_x = x;
+        self.pos_y = y;
+        self.target_x = x;
+        self.target_y = y;
+        self.placed = true;
     }
 
     pub fn set_emotion(&mut self, emotion: Emotion) {
@@ -96,7 +114,7 @@ impl Avatar {
             self.placed = true;
         }
 
-        let wandering = matches!(self.emotion, Emotion::Idle | Emotion::Happy);
+        let wandering = matches!(self.emotion, Emotion::Idle | Emotion::Happy) && self.speech_text.is_none();
         if wandering && global_tick >= self.next_wander {
             self.target_x = self.rng.gen_range(min_x..=max_x);
             self.target_y = self.rng.gen_range(min_y..=max_y);

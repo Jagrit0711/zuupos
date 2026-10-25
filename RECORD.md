@@ -177,6 +177,34 @@
 5. **Headless preview** (`shell/examples/avatar_preview.rs`): added multi-card test scenario producing `target/avatar_preview/full_ui_multicard.png`.
 **Verification**: Offline rendering generated `full_ui_multicard.png` inspected and verified — crisp badges, vector window controls, and action pills. Host test suite (`zuupos-agentd`, `zuupos-sdk`, `zuupos-shell`) passing cleanly.
 
+### Oct 26 2026 — Taby Ethereal Light Mode UI & Hotel Booking Visual Experience
+**Decision**:
+1. **Design System & Theme Engine** (`shell/src/theme.rs`): added `ThemeMode::Light` alongside `ThemeMode::Dark` with curated Taby Ethereal design tokens:
+   - Ambient Pastel Mesh: Pale mint/sage (`0xe2f1ea`), soft lavender blush (`0xeee7f7`), mist white base (`0xf6f9f8`).
+   - Floating Card Geometry: Pure white body (`0xffffff`), subtle 1px border (`0xe8edf5`), diffuse drop shadow (`0x121b28`, 22px blur, 0.08 alpha).
+   - Micro-Typography & Badges: Emerald finalized pill (`0x059669`), title dark typography (`0x181a1f`), location & time muted typography (`0x64748b`).
+   - Avatar & Speech: Iridescent pearl lilac orb (`0xd8c8fd`), periwinkle gradient body (`0xb5c9fe`), frosted speech bubble (`0xffffff`, 0.88 alpha, pointer notch).
+   - Centered Pill Dock: Capsule dock (`0xffffff`, 24px radius), clock `12:15 AM`, status divider, WiFi & camera glyphs, and soft periwinkle circular mic button (`0x5164f5`).
+2. **Card System Extensions** (`shell/src/cards/mod.rs`):
+   - Added `CardType::Booking` and `CardType::Gallery`.
+   - Added `CardDetailRow` struct for structured rows (`icon`, `label`, `value`).
+   - Added freeform spatial placement: `pos_x`, `pos_y`, `custom_width`, `custom_height`.
+   - Added `Card::new_booking` and `Card::new_gallery` constructors.
+3. **Renderer Pipeline** (`shell/src/renderer/mod.rs`):
+   - Added `theme_mode: ThemeMode` and `image_cache: HashMap<String, image::RgbaImage>` to `Renderer`.
+   - Implemented real-time image decoding & rounded corner blitting (`blit_image_rounded`).
+   - Implemented rounded drop shadow math (`draw_card_shadow`) with exact rounded box distance functions.
+   - Fixed rounded rectangle corner clipping math in `fill_rounded_rect`.
+   - Handled `draw_cards_light`: renders Booking Card (with `✓ BOOKING FINALIZED`, hotel name, location pin, dates/nights row, guests row) and Gallery Card (with 2-column image tile grid).
+   - Handled `draw_avatar_light`: renders the floating lilac pearl orb with radial lighting + attached frosted speech bubble (`"I've finalized your booking and gathered the visual references you wanted. Where to next?"`).
+   - Handled `draw_pill_dock`: renders the floating bottom capsule dock.
+4. **Photographic Assets** (`assets/cards/`):
+   - Generated authentic high-resolution travel & architecture imagery: `kyoto_street.jpg`, `mount_fuji.jpg`, `japan_night.jpg`, `modern_pavilion.jpg`, and `luxury_bedroom.jpg`.
+5. **Verification**:
+   - Added `taby_light_hotel_booking.png` generation to `shell/examples/avatar_preview.rs`.
+   - Inspected and verified offline rendering against reference mock screenshot.
+   - All unit tests across `zuupos-agentd`, `zuupos-sdk`, and `zuupos-shell` passing cleanly.
+
 ---
 
 ## Vision (Not Yet Built)

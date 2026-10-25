@@ -7,9 +7,10 @@
 use std::fs;
 use std::path::Path;
 use zuupos_shell::avatar::{Avatar, Emotion};
-use zuupos_shell::cards::{Card, CardType};
+use zuupos_shell::cards::{Card, CardDetailRow, CardType};
 use zuupos_shell::ipc::{PlanStep, StepStatus, SystemMetrics};
 use zuupos_shell::renderer::Renderer;
+use zuupos_shell::theme::ThemeMode;
 
 const EMOTIONS: &[(&str, Emotion)] = &[
     ("idle", Emotion::Idle),
@@ -144,6 +145,7 @@ fn main() {
             zuupos_shell::cards::CardAction::new("Open Note", "open_note"),
             zuupos_shell::cards::CardAction::new("Dismiss", "dismiss"),
         ],
+        ..Default::default()
     };
 
     let card_sys = Card {
@@ -158,6 +160,7 @@ fn main() {
         focused: false,
         minimized: true,
         actions: vec![],
+        ..Default::default()
     };
 
     let card_task = Card {
@@ -174,6 +177,7 @@ fn main() {
         actions: vec![
             zuupos_shell::cards::CardAction::new("Inspect", "inspect"),
         ],
+        ..Default::default()
     };
 
     let multi_cards = vec![&card_research, &card_sys, &card_task];
@@ -189,4 +193,53 @@ fn main() {
         renderer.render(tick, &multi_cards, &avatar, false);
     }
     save_png(&renderer, &out_dir.join("full_ui_multicard.png"));
+
+    // ── Taby Ethereal Light Mode Hotel Booking & Visual References Preview ───
+    let mut booking_card = Card::new_booking(
+        "Aman Kyoto",
+        "1 Ogocho, Kita Ward",
+        "BOOKING FINALIZED",
+        vec![
+            CardDetailRow::new("calendar", "Nov 12 - Nov 16", "4 Nights"),
+            CardDetailRow::new("bed", "Susuki Pavilion", "2 Guests"),
+        ],
+    );
+    booking_card.pos_x = Some(150);
+    booking_card.pos_y = Some(180);
+    booking_card.custom_width = Some(340);
+    booking_card.custom_height = Some(265);
+
+    let mut gallery_card = Card::new_gallery(
+        "Visual References Collected",
+        vec![
+            "assets/cards/kyoto_street.jpg".to_string(),
+            "assets/cards/mount_fuji.jpg".to_string(),
+            "assets/cards/japan_night.jpg".to_string(),
+            "assets/cards/modern_pavilion.jpg".to_string(),
+            "assets/cards/luxury_bedroom.jpg".to_string(),
+        ],
+    );
+    gallery_card.pos_x = Some(710);
+    gallery_card.pos_y = Some(140);
+    gallery_card.custom_width = Some(440);
+    gallery_card.custom_height = Some(440);
+
+    let light_cards = vec![&booking_card, &gallery_card];
+
+    let mut light_renderer = Renderer::new_headless(fw, fh);
+    light_renderer.theme_mode = ThemeMode::Light;
+
+    let mut light_avatar = Avatar::new();
+    light_avatar.set_position(590.0, 410.0);
+    light_avatar.set_speech(Some(
+        "I've finalized your booking\nand gathered the visual\nreferences you wanted.\nWhere to next?",
+    ));
+
+    let mut light_tick = 0u64;
+    for _ in 0..30 {
+        light_tick += 1;
+        light_avatar.tick(light_tick, fw, fh);
+        light_renderer.render(light_tick, &light_cards, &light_avatar, false);
+    }
+    save_png(&light_renderer, &out_dir.join("taby_light_hotel_booking.png"));
 }

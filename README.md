@@ -15,11 +15,11 @@
 | Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, work-stealing scheduler, syscall ABI, capability IPC channels, CPIO initramfs extraction, and ELF64 loader mapping real PID 1 |
 | Userspace (`userspace/hello`) | ✅ First freestanding userspace binary, builds + packs into `target/initramfs.cpio` via `tools/build-initramfs.sh` |
 | Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — reasoning → plan → tool-call cycles. Equipped with autonomous web search, doc fetcher, system introspection, and persistent curated memory |
-| Shell (`zuupos-shell`) | ✅ Menu bar (time/date/CPU/MEM, live agent status), roaming avatar, and voice-input dock, repainted off warm amber palette |
-| Avatar character | ✅ Anti-aliased orb creature that wanders the screen when idle/happy and holds still when thinking/speaking/alert — see `shell/examples/avatar_preview.rs` |
-| Voice dock | 🔄 Visual affordance only (mic button + wake-word hint, right edge) — no speech backend wired up yet, `agentd/src/voice` is still a stub |
+| Shell (`zuupos-shell`) | ✅ Dual-Palette UI Engine: Taby Ethereal Light Mode (pastel mint/lavender ambient mesh, pure white floating cards with diffuse shadows, pearl orb avatar, frosted speech bubbles, centered capsule island dock) and Warm Charcoal Dark Mode (menu bar, system stats, amber accents) |
+| Avatar character | ✅ Dual persona: soft iridescent lilac-periwinkle gradient pearl orb with attached speech bubbles (Light Mode) and expressive anti-aliased roaming creature with antenna & eyelids (Dark Mode) — see `shell/examples/avatar_preview.rs` |
+| Voice dock | 🔄 Visual affordance: centered floating capsule dock (`12:15 AM | ᯤ 📹 (🎙)`) in Light Mode; right-docked voice button with breathing ring in Dark Mode |
 | SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
-| Multi-app / customization | ✅ Multi-card stacked surface, app badge tags (`[RESEARCH]`, `[KERNEL]`), vector window controls (`✕`/`–`/`+`), action pills, and focus cycling |
+| Multi-app / spatial cards | ✅ Freeform spatial canvas & stacked surface: Booking Cards (`✓ BOOKING FINALIZED`, dates, guests), Visual Reference Gallery Cards (2-column photo tile grids), vector window controls, and focus cycling |
 | QEMU boot | ✅ Bare-metal UEFI boot + kernel initialization in QEMU via native macOS disk builder (`hdiutil`/FAT32), higher-half paging, GDT/TSS, and PID 1 ELF load from initramfs |
 
 The fastest way to see it working today is the **host demo** below — it runs the real shell + real agent + real local LLM on your machine right now.
