@@ -82,6 +82,7 @@ fn main() {
         card_type: CardType::Info,
         age_ticks: 10,
         max_age: 400,
+        ..Default::default()
     };
     let plan = vec![
         PlanStep {
@@ -126,4 +127,66 @@ fn main() {
         }
         save_png(&renderer, &out_dir.join(format!("{label}.png")));
     }
+
+    // ── Multi-Card & Multi-App Surface Preview ──────────────────────────────
+    let card_research = Card {
+        id: 1,
+        title: "Microkernel IPC Findings".to_string(),
+        body: "Compared seL4 capability transfers vs Zuupos channel rights. Zero-copy ring buffer delivers <1.2μs latency.".to_string(),
+        card_type: CardType::Info,
+        age_ticks: 25,
+        max_age: 500,
+        app_id: Some("research".to_string()),
+        kind: Some("notes".to_string()),
+        focused: true,
+        minimized: false,
+        actions: vec![
+            zuupos_shell::cards::CardAction::new("Open Note", "open_note"),
+            zuupos_shell::cards::CardAction::new("Dismiss", "dismiss"),
+        ],
+    };
+
+    let card_sys = Card {
+        id: 2,
+        title: "Kernel Diagnostics".to_string(),
+        body: "PMM: 1989 MiB usable. Heap: 32 MiB. VMM 4 GiB identity mapped.".to_string(),
+        card_type: CardType::Metric,
+        age_ticks: 60,
+        max_age: 600,
+        app_id: Some("kernel".to_string()),
+        kind: Some("monitor".to_string()),
+        focused: false,
+        minimized: true,
+        actions: vec![],
+    };
+
+    let card_task = Card {
+        id: 3,
+        title: "Autonomous Web Search".to_string(),
+        body: "Discovered 4 papers on work-stealing schedulers in Rust bare-metal targets.".to_string(),
+        card_type: CardType::Task,
+        age_ticks: 15,
+        max_age: 450,
+        app_id: Some("agentd".to_string()),
+        kind: Some("task".to_string()),
+        focused: false,
+        minimized: false,
+        actions: vec![
+            zuupos_shell::cards::CardAction::new("Inspect", "inspect"),
+        ],
+    };
+
+    let multi_cards = vec![&card_research, &card_sys, &card_task];
+    let mut renderer = Renderer::new_headless(fw, fh);
+    renderer.metrics = Some(metrics.clone());
+    renderer.plan_steps = plan;
+    let mut avatar = Avatar::new();
+    avatar.set_emotion(Emotion::Thinking);
+    let mut tick = 0u64;
+    for _ in 0..45 {
+        tick += 1;
+        avatar.tick(tick, fw, fh);
+        renderer.render(tick, &multi_cards, &avatar, false);
+    }
+    save_png(&renderer, &out_dir.join("full_ui_multicard.png"));
 }

@@ -5,7 +5,7 @@
 //! agentd and translates them into visual state changes.
 
 use crate::avatar::Avatar;
-use crate::cards::{Card, CardManager, CardType};
+use crate::cards::{Card, CardHitZone, CardManager, CardType};
 use crate::ipc::{IpcReceiver, ShellEvent};
 use crate::renderer::Renderer;
 use log::info;
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{KeyEvent, WindowEvent},
+    event::{ElementState, KeyEvent, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, NamedKey},
     window::{Window, WindowAttributes},
@@ -35,6 +35,7 @@ struct ShellApp {
     boot_phase: BootPhase,
     width: u32,
     height: u32,
+    cursor_pos: (f64, f64),
 }
 
 impl ShellApp {
@@ -65,6 +66,7 @@ impl ShellApp {
             boot_phase: BootPhase::Splash,
             width: 1280,
             height: 800,
+            cursor_pos: (0.0, 0.0),
         }
     }
 }
@@ -117,17 +119,72 @@ impl ApplicationHandler for ShellApp {
                 info!("[compositor] Window close requested");
                 event_loop.exit();
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_pos = (position.x, position.y);
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let (mx, my) = (self.cursor_pos.0 as u32, self.cursor_pos.1 as u32);
+                if let Some((card_id, zone)) = self.card_manager.hit_test(mx, my, self.width) {
+                    match zone {
+                        CardHitZone::Dismiss => {
+                            info!("[compositor] Mouse click: Dismiss card {}", card_id);
+                            self.card_manager.dismiss_card(card_id);
+                        }
+                        CardHitZone::MinimizeToggle => {
+                            info!("[compositor] Mouse click: Toggle minimize card {}", card_id);
+                            self.card_manager.toggle_minimized(card_id);
+                        }
+                        CardHitZone::CardBody => {
+                            info!("[compositor] Mouse click: Focus card {}", card_id);
+                            self.card_manager.focus_card(card_id);
+                        }
+                        CardHitZone::Action(idx) => {
+                            info!("[compositor] Mouse click: Action {} on card {}", idx, card_id);
+                            self.card_manager.focus_card(card_id);
+                        }
+                    }
+                }
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        logical_key: Key::Named(NamedKey::Escape),
+                        state: ElementState::Pressed,
+                        logical_key,
                         ..
                     },
                 ..
-            } => {
-                info!("[compositor] Escape pressed, exiting shell");
-                event_loop.exit();
-            }
+            } => match logical_key {
+                Key::Named(NamedKey::Escape) => {
+                    info!("[compositor] Escape pressed, exiting shell");
+                    event_loop.exit();
+                }
+                Key::Named(NamedKey::Tab) | Key::Named(NamedKey::ArrowDown) => {
+                    self.card_manager.focus_next();
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    self.card_manager.focus_prev();
+                }
+                Key::Character(ref c) if c == "m" || c == "M" => {
+                    if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
+                        self.card_manager.toggle_minimized(fid);
+                    }
+                }
+                Key::Character(ref c) if c == "x" || c == "X" => {
+                    if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
+                        self.card_manager.dismiss_card(fid);
+                    }
+                }
+                Key::Named(NamedKey::Backspace) => {
+                    if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
+                        self.card_manager.dismiss_card(fid);
+                    }
+                }
+                _ => {}
+            },
             WindowEvent::Resized(new_size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(new_size.width.max(1), new_size.height.max(1));

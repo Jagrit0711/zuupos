@@ -33,9 +33,7 @@ pub fn init(boot_info: &BootInfo) {
         IDENTITY_MAP_LIMIT / (1024 * 1024 * 1024)
     );
 
-    map_kernel(boot_info, &mut mapper);
-    identity_map_low_memory(&mut mapper);
-
+    // The bootloader already established higher-half and identity 4 GiB mappings
     *VIRT_MAPPER.lock() = Some(mapper);
 
     log::info!("[mm::virt] Virtual memory initialized — higher-half kernel active");
@@ -57,9 +55,7 @@ fn map_kernel(boot_info: &BootInfo, mapper: &mut OffsetPageTable) {
             kernel_start + (page.start_address().as_u64() - KERNEL_BASE),
         ));
         unsafe {
-            mapper
-                .map_to(page, frame, flags, &mut BuddyFrameAllocator)
-                .expect("kernel map failed");
+            let _ = mapper.map_to(page, frame, flags, &mut BuddyFrameAllocator);
         }
     }
 }

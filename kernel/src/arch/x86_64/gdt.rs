@@ -16,21 +16,41 @@ lazy_static::lazy_static! {
             let stack_start = VirtAddr::from_ptr(unsafe { &raw const STACK });
             stack_start + STACK_SIZE as u64
         };
+        // Ring 0 stack for interrupts/syscalls originating from Ring 3 userspace
+        tss.privilege_stack_table[0] = {
+            const KSTACK_SIZE: usize = 4096 * 8;
+            static mut KSTACK: [u8; KSTACK_SIZE] = [0; KSTACK_SIZE];
+            let stack_start = VirtAddr::from_ptr(unsafe { &raw const KSTACK });
+            stack_start + KSTACK_SIZE as u64
+        };
         tss
     };
 
-    static ref GDT: (GlobalDescriptorTable, Selectors) = {
+    pub static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
         let code_selector = gdt.append(Descriptor::kernel_code_segment());
         let data_selector = gdt.append(Descriptor::kernel_data_segment());
+        let user_data_selector = gdt.append(Descriptor::user_data_segment());
+        let user_code_selector = gdt.append(Descriptor::user_code_segment());
         let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
-        (gdt, Selectors { code_selector, data_selector, tss_selector })
+        (
+            gdt,
+            Selectors {
+                code_selector,
+                data_selector,
+                user_data_selector,
+                user_code_selector,
+                tss_selector,
+            },
+        )
     };
 }
 
 pub struct Selectors {
     pub code_selector: SegmentSelector,
     pub data_selector: SegmentSelector,
+    pub user_data_selector: SegmentSelector,
+    pub user_code_selector: SegmentSelector,
     pub tss_selector: SegmentSelector,
 }
 

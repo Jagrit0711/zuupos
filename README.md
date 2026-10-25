@@ -19,8 +19,8 @@
 | Avatar character | ✅ Anti-aliased orb creature that wanders the screen when idle/happy and holds still when thinking/speaking/alert — see `shell/examples/avatar_preview.rs` |
 | Voice dock | 🔄 Visual affordance only (mic button + wake-word hint, right edge) — no speech backend wired up yet, `agentd/src/voice` is still a stub |
 | SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
-| Multi-app / customization | 🔄 Multi-card surface and app window manager integration in progress |
-| QEMU boot | 🔄 `tools/run-qemu.sh` boots in QEMU (TCG on Apple Silicon; native macOS disk-image builder in progress) |
+| Multi-app / customization | ✅ Multi-card stacked surface, app badge tags (`[RESEARCH]`, `[KERNEL]`), vector window controls (`✕`/`–`/`+`), action pills, and focus cycling |
+| QEMU boot | ✅ Bare-metal UEFI boot + kernel initialization in QEMU via native macOS disk builder (`hdiutil`/FAT32), higher-half paging, GDT/TSS, and PID 1 ELF load from initramfs |
 
 The fastest way to see it working today is the **host demo** below — it runs the real shell + real agent + real local LLM on your machine right now.
 

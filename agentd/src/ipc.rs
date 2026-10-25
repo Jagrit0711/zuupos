@@ -33,6 +33,12 @@ pub enum CardType {
 
 // ─── Data Structures ─────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CardAction {
+    pub label: String,
+    pub action_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
     pub id: u64,
@@ -41,6 +47,34 @@ pub struct Card {
     pub card_type: CardType,
     pub age_ticks: u32,
     pub max_age: u32,
+    #[serde(default)]
+    pub app_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub focused: bool,
+    #[serde(default)]
+    pub minimized: bool,
+    #[serde(default)]
+    pub actions: Vec<CardAction>,
+}
+
+impl Default for Card {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            title: String::new(),
+            body: String::new(),
+            card_type: CardType::Info,
+            age_ticks: 0,
+            max_age: 300,
+            app_id: None,
+            kind: None,
+            focused: false,
+            minimized: false,
+            actions: Vec::new(),
+        }
+    }
 }
 
 /// A single step in an agent-generated task plan.

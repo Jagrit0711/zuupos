@@ -26,14 +26,11 @@ enum MemoryType {
     AcpiMemoryNVS = 13,
 }
 
-#[repr(C, packed)]
-struct UefiMemoryDescriptor {
-    _type: u32,
-    _padding: u32,
-    physical_start: u64,
-    virtual_start: u64,
-    number_of_pages: u64,
-    _attribute: u64,
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MemoryRegion {
+    pub phys_start: u64,
+    pub page_count: u64,
 }
 
 static PHYS_ALLOCATOR: Spinlock<Option<BuddyAllocator>> = Spinlock::new(None);
@@ -62,22 +59,20 @@ impl BuddyAllocator {
         let mut remaining = pages;
 
         while remaining > 0 {
-            let max_order = (remaining.trailing_zeros() as usize).min(MAX_ORDER);
-            let align_order = (addr / PAGE_SIZE).trailing_zeros() as usize;
+            let max_order = (63 - remaining.leading_zeros() as usize).min(MAX_ORDER);
+            let frame_idx = addr / PAGE_SIZE;
+            let align_order = if frame_idx > 0 {
+                frame_idx.trailing_zeros() as usize
+            } else {
+                MAX_ORDER
+            };
             let order = max_order.min(align_order).min(MAX_ORDER);
 
             let frames = 1u64 << order;
-            if frames > remaining {
-                let order = (remaining as u64).next_power_of_two().trailing_zeros() as usize - 1;
-                let frames = 1u64 << order;
-                self.free_lists[order].push_back(addr);
-                addr += frames * PAGE_SIZE;
-                remaining -= frames;
-            } else {
-                self.free_lists[order].push_back(addr);
-                addr += frames * PAGE_SIZE;
-                remaining -= frames;
-            }
+            self.free_lists[order].push_back(addr);
+            self.total_frames += frames;
+            addr += frames * PAGE_SIZE;
+            remaining -= frames;
         }
     }
 
@@ -139,7 +134,7 @@ impl BuddyAllocator {
         if n == 0 {
             return None;
         }
-        let order = (n as u64).next_power_of_two().trailing_zeros() as usize - 1;
+        let order = (n as u64).next_power_of_two().trailing_zeros() as usize;
         self.alloc(order)
     }
 
@@ -147,43 +142,37 @@ impl BuddyAllocator {
         if n == 0 {
             return;
         }
-        let order = (n as u64).next_power_of_two().trailing_zeros() as usize - 1;
+        let order = (n as u64).next_power_of_two().trailing_zeros() as usize;
         self.free(addr, order);
     }
 }
 
 pub fn init(boot_info: &BootInfo) {
     let mut allocator = BuddyAllocator::new();
+    let regions = unsafe {
+        core::slice::from_raw_parts(
+            boot_info.memory_map_addr as *const MemoryRegion,
+            boot_info.memory_map_len,
+        )
+    };
 
-    let mmap_addr = boot_info.memory_map_addr as *const UefiMemoryDescriptor;
-    let desc_size = boot_info.memory_map_desc_size;
-    let entry_count = boot_info.memory_map_len / desc_size;
+    for region in regions {
+        let mut base = region.phys_start;
+        let mut pages = region.page_count;
 
-    for i in 0..entry_count {
-        let desc = unsafe { &*mmap_addr.add(i) };
-        let mem_type = match desc._type {
-            1 => MemoryType::Available,
-            2 => MemoryType::BootServicesCode,
-            3 => MemoryType::BootServicesData,
-            4 => MemoryType::LoaderCode,
-            5 => MemoryType::LoaderData,
-            7 => MemoryType::AcpiReclaim,
-            _ => MemoryType::Reserved,
-        };
-
-        if matches!(
-            mem_type,
-            MemoryType::Available
-                | MemoryType::BootServicesCode
-                | MemoryType::BootServicesData
-                | MemoryType::LoaderCode
-                | MemoryType::LoaderData
-                | MemoryType::AcpiReclaim
-        ) {
-            let base = desc.physical_start;
-            let pages = desc.number_of_pages;
+        // Skip first 16 MiB (reserved for BIOS, UEFI, kernel at 2MiB, bootloader data)
+        let reserved_limit = 16 * 1024 * 1024;
+        let region_end = base + pages * PAGE_SIZE;
+        if region_end <= reserved_limit {
+            continue;
+        }
+        if base < reserved_limit {
+            let skip_pages = (reserved_limit - base) / PAGE_SIZE;
+            base = reserved_limit;
+            pages = pages.saturating_sub(skip_pages);
+        }
+        if pages > 0 {
             allocator.add_region(base, pages);
-            allocator.total_frames += pages;
             allocator.max_addr = allocator.max_addr.max(base + pages * PAGE_SIZE);
         }
     }

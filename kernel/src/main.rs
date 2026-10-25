@@ -42,17 +42,17 @@ pub extern "C" fn _start(boot_info: *const arch::x86_64::boot_info::BootInfo) ->
     arch::x86_64::init();
     info!("[arch] GDT/IDT/TSS initialized");
 
-    // 3. Initialize physical memory manager from UEFI memory map
+    // 3. Initialize heap allocator
+    mm::heap::init();
+    info!("[mm] Heap allocator online");
+
+    // 4. Initialize physical memory manager from UEFI memory map
     mm::phys::init(boot_info);
     info!("[mm] Physical memory manager initialized");
 
-    // 4. Initialize virtual memory manager
+    // 5. Initialize virtual memory manager
     mm::virt::init(boot_info);
     info!("[mm] Virtual memory initialized");
-
-    // 5. Initialize heap allocator
-    mm::heap::init();
-    info!("[mm] Heap allocator online");
 
     // 6. Initialize framebuffer display
     drivers::framebuffer::init(boot_info);

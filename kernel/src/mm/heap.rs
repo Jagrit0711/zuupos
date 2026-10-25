@@ -5,8 +5,8 @@ use linked_list_allocator::LockedHeap;
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
-/// Initial kernel heap: 4 MiB.
-const HEAP_SIZE: usize = 4 * 1024 * 1024;
+/// Initial kernel heap: 32 MiB.
+const HEAP_SIZE: usize = 32 * 1024 * 1024;
 
 static mut HEAP_SPACE: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
 

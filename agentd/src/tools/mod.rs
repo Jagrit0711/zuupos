@@ -120,6 +120,8 @@ impl Tool for DisplayCardTool {
             card_type,
             age_ticks: 0,
             max_age: 450,
+            app_id: Some("agent".to_string()),
+            ..Default::default()
         }));
 
         format!("Card displayed: {title}")
@@ -180,6 +182,8 @@ impl Tool for SetReminderTool {
             card_type: CardType::Task,
             age_ticks: 0,
             max_age: 400,
+            app_id: Some("reminder".to_string()),
+            ..Default::default()
         }));
 
         format!("Reminder set: '{title}' in {mins} minutes")
@@ -233,6 +237,8 @@ impl Tool for FocusMusicTool {
             card_type: CardType::Weather,
             age_ticks: 0,
             max_age: 350,
+            app_id: Some("media".to_string()),
+            ..Default::default()
         }));
 
         format!("Playing {genre} focus music")

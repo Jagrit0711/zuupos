@@ -160,9 +160,22 @@
 **Decision**: Created `kernel/src/initramfs.rs` (CPIO newc parser) and `kernel/src/loader.rs` (ELF64 segment mapper and user stack allocator at `0x0000_7FFF_FFFF_0000`). `sched::spawn_init_from_initramfs(&BootInfo)` parses `/bin/hello` from the bootloader memory buffer and spawns real PID 1.
 **Reason**: Replaces the hardcoded dummy entry point with genuine userspace process execution from memory.
 
-### Oct 25 2026 — Capability IPC Syscalls
-**Decision**: Wired `SYS_IPC_SEND` and `SYS_IPC_RECV` in `kernel/src/syscall/mod.rs` connected to `kernel/src/ipc/mod.rs`.
-**Reason**: Enables userspace processes and future child agents to exchange capability-checked messages across memory boundaries.
+### Oct 25 2026 — macOS Native UEFI Disk Builder & Bare-Metal QEMU Boot (Roadmap 1.19 & 1.20)
+**Decision**:
+1. Rewrote `tools/create-disk-image.sh` with Darwin autodetection: uses `hdiutil create`, `hdiutil attach -nobrowse`, volume population, and `hdiutil convert -format UDTO` to create raw GPT/FAT32 UEFI disk images on macOS without Linux-specific tooling (`parted`, `losetup`, `mkfs.fat`).
+2. Fixed UEFI bootloader (`bootloader/src/main.rs`): replaced length-0 `Vec::with_capacity` buffer bugs with initialized allocations, fixed null pointer panics in `alloc_page` (`AllocateType::AnyPages`), mapped 4 GiB huge-page tables (identity and `0xFFFF_8000_0000_0000` higher-half), and parsed ELF `PT_LOAD` segments with BSS zeroing.
+3. Added `.cargo/config.toml` setting `-C relocation-model=static` for `x86_64-unknown-none` target so kernel calls jump to correct PC-relative addresses instead of un-relocated GOT stubs.
+4. Kernel memory & privilege: moved 32 MiB heap init before PMM, corrected buddy allocator order calculation (`63 - remaining.leading_zeros()`), configured user code/data segments in GDT and `TSS.privilege_stack_table[0]`, enabled Ring 3 for IDT 0x80 syscalls.
+**Verification**: Verified in QEMU: UEFI firmware loads bootloader, kernel boots, initializes PMM/VMM/GDT/IDT/PCI/NVMe/IPC/Interrupts/Scheduler, extracts `/bin/hello` (3840 bytes) from initramfs CPIO, sets up stack at `0x7fffffff0000`, and spawns PID 1!
+
+### Oct 25 2026 — Multi-App & Multi-Card Surface in Shell & SDK (Roadmap 1.23)
+**Decision**:
+1. **SDK primitives** (`sdk/src/ui.rs`): extended `Card` and `CardUpdates` with `app_id`, `kind`, `focused`, `minimized`, along with fluent builder methods (`with_app_id`, `with_kind`, `with_focused`, `with_minimized`).
+2. **Card manager** (`shell/src/cards/mod.rs`): implemented multi-card lifecycle supporting up to 6 stacked cards, focus cycling (`focus_next`, `focus_prev`), minimize/expand toggle, dismiss, and geometry hit testing (`hit_test`) for body, window controls, and action pills.
+3. **Renderer** (`shell/src/renderer/mod.rs`): upgraded `draw_cards` with dynamic vertical stacking layout, glassmorphism opacity hierarchy (0.94 focused vs 0.78 unfocused), active perimeter glow on focused cards, app identifier badges (`[RESEARCH]`, `[KERNEL]`, `[AGENTD]`), vector micro-controls (`✕` dismiss, `–`/`+` minimize/restore), action button pills with upper highlight border, and fixed blend fading polarity.
+4. **Compositor interaction** (`shell/src/compositor/mod.rs`): wired interactive cursor tracking and mouse clicks (focusing cards, toggling minimize, triggering actions, dismissing) + keyboard shortcuts (Tab / Arrow keys to cycle focus, 'M' to minimize, 'X' / Backspace to dismiss).
+5. **Headless preview** (`shell/examples/avatar_preview.rs`): added multi-card test scenario producing `target/avatar_preview/full_ui_multicard.png`.
+**Verification**: Offline rendering generated `full_ui_multicard.png` inspected and verified — crisp badges, vector window controls, and action pills. Host test suite (`zuupos-agentd`, `zuupos-sdk`, `zuupos-shell`) passing cleanly.
 
 ---
 

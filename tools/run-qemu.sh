@@ -17,14 +17,19 @@ echo "=== ZuuposOS QEMU Runner ==="
 echo "Mode: $MODE"
 echo "Project: $PROJECT_ROOT"
 
+BUILD_FLAG=""
+if [[ "$MODE" == "release" ]]; then
+    BUILD_FLAG="--release"
+fi
+
 # Build kernel
 echo "Building kernel..."
 cd "$PROJECT_ROOT"
-cargo build -p zuupos-kernel --target x86_64-unknown-none --$MODE 2>&1 | tail -20
+cargo build -p zuupos-kernel --target x86_64-unknown-none $BUILD_FLAG 2>&1 | tail -20
 
 # Build bootloader
 echo "Building bootloader..."
-cargo build -p zuupos-boot --target x86_64-unknown-uefi --$MODE 2>&1 | tail -10
+cargo build -p zuupos-boot --target x86_64-unknown-uefi $BUILD_FLAG 2>&1 | tail -10
 
 # Verify artifacts exist
 if [[ ! -f "$KERNEL_ELF" ]]; then
@@ -36,22 +41,34 @@ if [[ ! -f "$BOOTLOADER_EFI" ]]; then
     exit 1
 fi
 
+# Build initramfs if not present
+if [[ ! -f "$PROJECT_ROOT/target/initramfs.cpio" ]]; then
+    echo "Building initramfs..."
+    "$PROJECT_ROOT/tools/build-initramfs.sh"
+fi
+
 # Create disk image
 echo "Creating disk image..."
-"$PROJECT_ROOT/tools/create-disk-image.sh" "$DISK_IMG" "$BOOTLOADER_EFI" "$KERNEL_ELF"
+"$PROJECT_ROOT/tools/create-disk-image.sh" "$DISK_IMG" "$BOOTLOADER_EFI" "$KERNEL_ELF" "$PROJECT_ROOT/target/initramfs.cpio"
 
 # Check for OVMF
 if [[ ! -f "$OVMF_CODE" ]]; then
     # Try alternative locations
     for path in \
+        "/opt/homebrew/share/qemu/edk2-x86_64-code.fd" \
+        "/usr/local/share/qemu/edk2-x86_64-code.fd" \
         "/usr/share/edk2/ovmf/OVMF_CODE.fd" \
         "/usr/share/OVMF/OVMF_CODE.fd" \
-        "/usr/share/qemu/OVMF_CODE.fd" \
-        "/opt/homebrew/share/qemu/edk2-aarch64-code.fd" \
-        "/usr/local/share/qemu/edk2-x86_64-code.fd"; do
+        "/usr/share/qemu/OVMF_CODE.fd"; do
         if [[ -f "$path" ]]; then
             OVMF_CODE="$path"
-            OVMF_VARS="${path/CODE/VARS}"
+            VARS_CANDIDATE="${path/CODE/VARS}"
+            VARS_CANDIDATE="${VARS_CANDIDATE/-code/-vars}"
+            if [[ -f "$VARS_CANDIDATE" ]]; then
+                OVMF_VARS="$VARS_CANDIDATE"
+            else
+                OVMF_VARS=""
+            fi
             break
         fi
     done
@@ -87,8 +104,18 @@ echo "Starting QEMU..."
 echo "  Disk: $DISK_IMG"
 echo "  Kernel: $KERNEL_ELF"
 echo "  Bootloader: $BOOTLOADER_EFI"
-echo "  OVMF: $OVMF_CODE"
+echo "  OVMF: $OVMF_CODE (vars: ${OVMF_VARS:-none})"
 echo "  Accel: $ACCEL | CPU: $CPU | Display: $DISPLAY_BACKEND"
+
+QEMU_BIOS_ARGS=()
+if [[ -n "$OVMF_VARS" && -f "$OVMF_VARS" ]]; then
+    QEMU_BIOS_ARGS+=(
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"
+        -drive if=pflash,format=raw,file="$OVMF_VARS"
+    )
+else
+    QEMU_BIOS_ARGS+=(-drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE")
+fi
 
 # Run QEMU
 exec qemu-system-x86_64 \
@@ -96,8 +123,7 @@ exec qemu-system-x86_64 \
     -cpu "$CPU" \
     -m 2G \
     -smp 4 \
-    -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-    -drive if=pflash,format=raw,file="$OVMF_VARS" \
+    "${QEMU_BIOS_ARGS[@]}" \
     -drive if=virtio,format=raw,file="$DISK_IMG" \
     -serial stdio \
     -display "$DISPLAY_BACKEND" \

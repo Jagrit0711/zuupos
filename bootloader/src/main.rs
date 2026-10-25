@@ -141,14 +141,16 @@ fn main() -> Status {
         physical_memory_offset,
     };
 
-    // --- Exit boot services ---
+    // --- Exit boot services and jump to kernel ---
+    info!("Jumping to kernel at {:#x}...", kernel_entry);
     info!("Exiting boot services...");
     let _memory_map = unsafe { uefi::boot::exit_boot_services(MemoryType::LOADER_DATA) };
 
-    // --- Jump to kernel ---
     let boot_info_ptr = &boot_info as *const BootInfo;
-    info!("Jumping to kernel at {:#x}...", kernel_entry);
     unsafe {
+        // Switch to our PML4 page tables
+        core::arch::asm!("mov cr3, {0}", in(reg) pml4_addr);
+        // Jump to kernel entry point
         core::arch::asm!(
             "jmp rax",
             in("rax") kernel_entry,
@@ -198,20 +200,29 @@ fn draw_boot_splash(fb_addr: u64, width: u32, height: u32, stride: u32) {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MemoryRegion {
+    pub phys_start: u64,
+    pub page_count: u64,
+}
+
 fn get_memory_map() -> Option<(u64, usize, usize)> {
     let mmap = uefi::boot::memory_map(MemoryType::LOADER_DATA).ok()?;
-    let meta = mmap.meta();
-    let desc_size = meta.desc_size;
-    let len = mmap.len();
-    // Copy descriptors to a new buffer we own
-    let mut buffer = Vec::with_capacity(len);
+    let mut regions = Vec::new();
     for desc in mmap.entries() {
-        // MemoryDescriptor fields are: ty, phys_start, page_count
-        buffer.push(*desc);
+        if desc.ty == MemoryType::CONVENTIONAL {
+            regions.push(MemoryRegion {
+                phys_start: desc.phys_start,
+                page_count: desc.page_count,
+            });
+        }
     }
-    let addr = buffer.as_ptr() as u64;
-    mem::forget(buffer);
-    Some((addr, len, desc_size))
+    let count = regions.len();
+    let desc_size = core::mem::size_of::<MemoryRegion>();
+    let addr = regions.as_ptr() as u64;
+    mem::forget(regions);
+    Some((addr, count, desc_size))
 }
 
 fn find_rsdp() -> Option<u64> {
@@ -231,7 +242,7 @@ fn load_kernel() -> Option<(u64, u64, u64)> {
 
     let mut root_dir = fs.open_volume().ok()?;
     let path = cstr16!("\\EFI\\ZUUPOS\\KERNEL.ELF");
-    let mut kernel_file = root_dir
+    let kernel_file = root_dir
         .open(path, FileMode::Read, FileAttribute::empty())
         .ok()?;
 
@@ -241,48 +252,68 @@ fn load_kernel() -> Option<(u64, u64, u64)> {
             .get_info::<FileInfo>(&mut info_buffer)
             .ok()?
             .file_size() as usize;
-        let mut buffer = Vec::with_capacity(file_size);
+        let mut buffer = alloc::vec![0u8; file_size];
         file.read(&mut buffer).ok()?;
 
-        let kernel_start = find_kernel_load_address(&buffer)?;
-        let kernel_end = kernel_start + file_size as u64;
-
-        // Copy kernel to physical memory
-        unsafe {
-            core::ptr::copy_nonoverlapping(buffer.as_ptr(), kernel_start as *mut u8, file_size);
+        if buffer.len() < 64 || &buffer[0..4] != b"\x7fELF" {
+            return None;
         }
 
-        let entry = parse_elf_entry(&buffer, kernel_start)?;
+        let e_entry = u64::from_le_bytes(buffer[24..32].try_into().ok()?);
+        let e_phoff = u64::from_le_bytes(buffer[32..40].try_into().ok()?) as usize;
+        let e_phentsize = u16::from_le_bytes(buffer[54..56].try_into().ok()?) as usize;
+        let e_phnum = u16::from_le_bytes(buffer[56..58].try_into().ok()?) as usize;
+
+        let kernel_start: u64 = 0x200000;
+        let mut kernel_end: u64 = kernel_start;
+
+        // Parse program headers and load PT_LOAD segments
+        for i in 0..e_phnum {
+            let ph_offset = e_phoff + i * e_phentsize;
+            if ph_offset + 56 > buffer.len() {
+                break;
+            }
+            let ph = &buffer[ph_offset..ph_offset + 56];
+            let p_type = u32::from_le_bytes(ph[0..4].try_into().ok()?);
+            if p_type == 1 {
+                // PT_LOAD
+                let p_offset = u64::from_le_bytes(ph[8..16].try_into().ok()?) as usize;
+                let p_vaddr = u64::from_le_bytes(ph[16..24].try_into().ok()?);
+                let p_filesz = u64::from_le_bytes(ph[32..40].try_into().ok()?) as usize;
+                let p_memsz = u64::from_le_bytes(ph[40..48].try_into().ok()?) as usize;
+
+                let dest_addr = if p_vaddr >= kernel_start {
+                    p_vaddr
+                } else {
+                    kernel_start + p_vaddr
+                };
+                let dest = dest_addr as *mut u8;
+                if p_filesz > 0 && p_offset + p_filesz <= buffer.len() {
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(buffer[p_offset..].as_ptr(), dest, p_filesz);
+                    }
+                }
+                if p_memsz > p_filesz {
+                    unsafe {
+                        core::ptr::write_bytes(dest.add(p_filesz), 0, p_memsz - p_filesz);
+                    }
+                }
+                let seg_end = dest_addr + p_memsz as u64;
+                if seg_end > kernel_end {
+                    kernel_end = seg_end;
+                }
+            }
+        }
+
+        let entry = if e_entry >= kernel_start {
+            e_entry
+        } else {
+            kernel_start + e_entry
+        };
         Some((kernel_start, kernel_end, entry))
     } else {
         None
     }
-}
-
-fn find_kernel_load_address(_buffer: &[u8]) -> Option<u64> {
-    // Simple ELF parsing to find the load address
-    // For now, use a fixed address: 2 MiB (after first 2 MiB reserved for bootloader)
-    Some(0x200000)
-}
-
-fn parse_elf_entry(buffer: &[u8], load_addr: u64) -> Option<u64> {
-    if buffer.len() < 64 {
-        return None;
-    }
-    // Check ELF magic
-    if &buffer[0..4] != b"\x7fELF" {
-        return None;
-    }
-    // 64-bit, little endian
-    if buffer[4] != 2 || buffer[5] != 1 {
-        return None;
-    }
-    // Entry point at offset 24 (8 bytes)
-    let entry = u64::from_le_bytes([
-        buffer[24], buffer[25], buffer[26], buffer[27], buffer[28], buffer[29], buffer[30],
-        buffer[31],
-    ]);
-    Some(load_addr + entry)
 }
 
 fn load_initramfs() -> Option<(u64, u64)> {
@@ -304,7 +335,7 @@ fn load_initramfs() -> Option<(u64, u64)> {
 
         // Allocate physical memory for initramfs
         let initramfs_start = alloc_physical_memory(file_size)?;
-        let mut buffer = Vec::with_capacity(file_size);
+        let mut buffer = alloc::vec![0u8; file_size];
         file.read(&mut buffer).ok()?;
 
         // Copy initramfs to physical memory
@@ -319,153 +350,81 @@ fn load_initramfs() -> Option<(u64, u64)> {
 }
 
 fn alloc_physical_memory(size: usize) -> Option<u64> {
-    let mmap = uefi::boot::memory_map(MemoryType::LOADER_DATA).ok()?;
-
     let pages_needed = (size + 4095) / 4096;
-    let mut consecutive_pages: u64 = 0;
-    let mut start_page = 0u64;
-
-    for desc in mmap.entries() {
-        if desc.ty == MemoryType::CONVENTIONAL {
-            let page_start = desc.phys_start / 4096;
-            let page_count = desc.page_count;
-
-            if page_start == start_page + consecutive_pages {
-                consecutive_pages += page_count;
-                if consecutive_pages >= pages_needed as u64 {
-                    let phys_start = start_page * 4096;
-                    let status = uefi::boot::allocate_pages(
-                        AllocateType::Address(phys_start as uefi::data_types::PhysicalAddress),
-                        MemoryType::LOADER_DATA,
-                        pages_needed,
-                    );
-                    if status.is_ok() {
-                        return Some(phys_start);
-                    }
-                }
-            } else {
-                start_page = page_start;
-                consecutive_pages = page_count;
-            }
-        }
-    }
-    None
+    let phys_addr = uefi::boot::allocate_pages(
+        AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        pages_needed,
+    ).ok()?;
+    Some(phys_addr.as_ptr() as u64)
 }
 
 fn setup_page_tables(
-    kernel_start: u64,
-    kernel_end: u64,
-    fb_addr: u64,
-    fb_width: u32,
-    fb_height: u32,
-    fb_stride: u32,
+    _kernel_start: u64,
+    _kernel_end: u64,
+    _fb_addr: u64,
+    _fb_width: u32,
+    _fb_height: u32,
+    _fb_stride: u32,
 ) -> Option<(u64, u64)> {
     const PAGE_SIZE: u64 = 4096;
     const KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
-    const IDENTITY_MAP_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
 
-    // Allocate page tables (PML4, PDPT, PD, PT)
+    // Allocate page tables: PML4, PDPT, and 4 Page Directories for 4 GiB
     let pml4_addr = alloc_page()?;
     let pdpt_addr = alloc_page()?;
-    let pd_addr = alloc_page()?;
-    let pt_addr = alloc_page()?;
+    let mut pd_addrs = [0u64; 4];
+    for k in 0..4 {
+        pd_addrs[k] = alloc_page()?;
+    }
 
-    // Zero the pages
+    // Zero PML4 and PDPT
     unsafe {
         core::ptr::write_bytes(pml4_addr as *mut u8, 0, PAGE_SIZE as usize);
         core::ptr::write_bytes(pdpt_addr as *mut u8, 0, PAGE_SIZE as usize);
-        core::ptr::write_bytes(pd_addr as *mut u8, 0, PAGE_SIZE as usize);
-        core::ptr::write_bytes(pt_addr as *mut u8, 0, PAGE_SIZE as usize);
     }
 
-    // Map PML4[511] -> PDPT (higher-half kernel)
-    // Map PML4[0] -> PDPT (identity map low memory)
-    let pml4 = pml4_addr as *mut u64;
+    // Map each PD with 512 entries of 2 MiB huge pages (0..4 GiB total)
+    for (k, &pd_addr) in pd_addrs.iter().enumerate() {
+        unsafe {
+            core::ptr::write_bytes(pd_addr as *mut u8, 0, PAGE_SIZE as usize);
+            let pd = pd_addr as *mut u64;
+            let gig_offset = k as u64 * 1024 * 1024 * 1024;
+            for i in 0..512usize {
+                let phys = gig_offset + (i as u64 * 2 * 1024 * 1024);
+                // Present (0x1) | Writable (0x2) | HugePage 2MiB (0x80)
+                *pd.add(i) = phys | 0x83;
+            }
+        }
+    }
+
+    // Wire PDPT entries 0..4 to each PD
     let pdpt = pdpt_addr as *mut u64;
-    let pd = pd_addr as *mut u64;
-    let pt = pt_addr as *mut u64;
-
-    // Higher-half kernel: PML4[511] -> PDPT
-    unsafe { *pml4.add(511) = pdpt_addr | 0x3 }; // Present | Writable
-
-    // Identity map: PML4[0] -> PDPT
-    unsafe { *pml4.add(0) = pdpt_addr | 0x3 };
-
-    // PDPT[0] -> PD (for both mappings, sharing)
-    unsafe { *pdpt.add(0) = pd_addr | 0x3 };
-
-    // PD[0] -> PT (first 2 MiB)
-    unsafe { *pd.add(0) = pt_addr | 0x3 };
-
-    // Map first 2 MiB identity (4 KiB pages)
-    for i in 0..512usize {
-        let phys = i as u64 * PAGE_SIZE;
-        unsafe { *pt.add(i) = phys | 0x3 };
-    }
-
-    // Map kernel in higher-half (2 MiB pages)
-    let kernel_pages = (kernel_end - kernel_start + PAGE_SIZE - 1) / PAGE_SIZE;
-    let pd_kernel = alloc_page()?;
-    unsafe { core::ptr::write_bytes(pd_kernel as *mut u8, 0, PAGE_SIZE as usize) };
-    unsafe { *pdpt.add(1) = pd_kernel | 0x3 }; // PDPT[1] -> kernel PD
-
-    for i in 0..(kernel_pages as usize).min(512) {
-        let phys = kernel_start + i as u64 * PAGE_SIZE;
-        let virt = KERNEL_BASE + phys;
-        let pd_idx = ((virt >> 21) & 0x1FF) as usize;
-        let pt_idx = ((virt >> 12) & 0x1FF) as usize;
-
-        if pt_idx == 0 {
-            let pt_kernel = alloc_page()?;
-            unsafe { core::ptr::write_bytes(pt_kernel as *mut u8, 0, PAGE_SIZE as usize) };
-            unsafe { *(pd_kernel as *mut u64).add(pd_idx) = pt_kernel | 0x3 };
+    for (k, &pd_addr) in pd_addrs.iter().enumerate() {
+        unsafe {
+            *pdpt.add(k) = pd_addr | 0x3;
         }
-        let pt_kernel = unsafe { *(pd_kernel as *mut u64).add(pd_idx) & !0xFFF };
-        unsafe { *(pt_kernel as *mut u64).add(pt_idx) = phys | 0x3 };
     }
 
-    // Map framebuffer in higher-half
-    let fb_size = fb_stride as u64 * fb_height as u64 * 4;
-    let fb_pages = (fb_size + PAGE_SIZE - 1) / PAGE_SIZE;
-    for i in 0..fb_pages as usize {
-        let phys = fb_addr + (i as u64) * PAGE_SIZE;
-        let virt = KERNEL_BASE + phys;
-        let pd_idx = ((virt >> 21) & 0x1FF) as usize;
-        let pt_idx = ((virt >> 12) & 0x1FF) as usize;
-
-        if pt_idx == 0 {
-            let pt_fb = alloc_page()?;
-            unsafe { core::ptr::write_bytes(pt_fb as *mut u8, 0, PAGE_SIZE as usize) };
-            unsafe { *(pd_kernel as *mut u64).add(pd_idx) = pt_fb | 0x3 };
-        }
-        let pt_fb = unsafe { *(pd_kernel as *mut u64).add(pd_idx) & !0xFFF };
-        unsafe { *(pt_fb as *mut u64).add(pt_idx) = phys | 0x3 | 0x80000000000 };
-        // NX bit
+    // Wire PML4:
+    // PML4[0] -> PDPT (identity map first 4 GiB)
+    // PML4[256] -> PDPT (higher-half direct map at 0xFFFF_8000_0000_0000)
+    // PML4[511] -> PDPT (top higher-half map)
+    let pml4 = pml4_addr as *mut u64;
+    unsafe {
+        *pml4.add(0) = pdpt_addr | 0x3;
+        *pml4.add(256) = pdpt_addr | 0x3;
+        *pml4.add(511) = pdpt_addr | 0x3;
     }
 
-    // Physical memory offset = KERNEL_BASE (for higher-half direct mapping)
     Some((pml4_addr, KERNEL_BASE))
 }
 
 fn alloc_page() -> Option<u64> {
-    let mmap = uefi::boot::memory_map(MemoryType::LOADER_DATA).ok()?;
-
-    for desc in mmap.entries() {
-        if desc.ty == MemoryType::CONVENTIONAL {
-            let pages = desc.page_count;
-            if pages > 0 {
-                let phys = desc.phys_start;
-                // Mark as used by allocating
-                let status = uefi::boot::allocate_pages(
-                    AllocateType::Address(phys as PhysicalAddress),
-                    MemoryType::LOADER_DATA,
-                    1,
-                );
-                if status.is_ok() {
-                    return Some(phys);
-                }
-            }
-        }
-    }
-    None
+    let ptr = uefi::boot::allocate_pages(
+        AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        1,
+    ).ok()?;
+    Some(ptr.as_ptr() as u64)
 }

@@ -454,14 +454,22 @@ impl Renderer {
 
     fn draw_cards(&mut self, cards: &[&Card], _tick: u64) {
         let card_w: u32 = 340;
-        let card_h: u32 = 115;
         let margin: u32 = 16;
         let start_x = self.width.saturating_sub(card_w + margin);
-        let start_y = STATUSBAR_HEIGHT + margin;
+        let mut curr_y = STATUSBAR_HEIGHT + margin;
 
-        for (i, card) in cards.iter().enumerate() {
-            let y = start_y + i as u32 * (card_h + 12);
-            if y + card_h > self.height {
+        for card in cards.iter() {
+            let is_minimized = card.minimized;
+            let has_actions = !card.actions.is_empty() && !is_minimized;
+            let card_h: u32 = if is_minimized {
+                36
+            } else if has_actions {
+                142
+            } else {
+                115
+            };
+
+            if curr_y + card_h > self.height {
                 break;
             }
 
@@ -469,6 +477,7 @@ impl Renderer {
             let slide_progress = (card.age_ticks as f32 / 20.0).min(1.0);
             let slide_offset = ((1.0 - ease_out_cubic(slide_progress)) * 70.0) as u32;
             let x = start_x + slide_offset;
+            let y = curr_y;
 
             // Fade out near end of life
             let fade = if card.age_ticks > card.max_age.saturating_sub(60) {
@@ -477,6 +486,7 @@ impl Renderer {
                 1.0
             };
             if fade <= 0.0 {
+                curr_y += card_h + 10;
                 continue;
             }
 
@@ -489,58 +499,162 @@ impl Renderer {
                 CardType::Plan => (CARD_BG_PLAN, ACCENT_GREEN),
             };
 
+            let bg_alpha = if card.focused { 0.94 } else { 0.78 } * fade;
+
             // Glassmorphism card body
             for py in y..y + card_h {
                 for px in x..x + card_w {
                     if px < self.width && py < self.height {
                         let idx = (py * self.width + px) as usize;
-                        self.buf[idx] = blend_pixel(self.buf[idx], bg, 0.88 * fade);
+                        self.buf[idx] = blend_pixel(self.buf[idx], bg, bg_alpha);
+                    }
+                }
+            }
+
+            // Focused highlight perimeter glow
+            if card.focused {
+                for px in x..x + card_w {
+                    if px < self.width && y < self.height {
+                        let idx = (y * self.width + px) as usize;
+                        self.buf[idx] = blend_pixel(self.buf[idx], accent, 0.45 * fade);
+                    }
+                    let by = y + card_h - 1;
+                    if px < self.width && by < self.height {
+                        let idx = (by * self.width + px) as usize;
+                        self.buf[idx] = blend_pixel(self.buf[idx], accent, 0.35 * fade);
+                    }
+                }
+                for py in y..y + card_h {
+                    let rx = x + card_w - 1;
+                    if rx < self.width && py < self.height {
+                        let idx = (py * self.width + rx) as usize;
+                        self.buf[idx] = blend_pixel(self.buf[idx], accent, 0.35 * fade);
                     }
                 }
             }
 
             // Accent left border
-            self.fill_rect(x, y, 3, card_h, blend(accent, 0x000000, 1.0 - fade));
+            let bar_w = if card.focused { 4 } else { 2 };
+            self.fill_rect(x, y, bar_w, card_h, blend(accent, 0x000000, fade));
+
             // Top highlight
-            self.fill_rect(x + 3, y, card_w - 3, 1, blend(bg, 0xffffff, 0.10));
+            self.fill_rect(x + bar_w, y, card_w - bar_w, 1, blend(bg, 0xffffff, if card.focused { 0.20 } else { 0.10 }));
             // Bottom shadow
             self.fill_rect(x, y + card_h - 1, card_w, 1, 0x000000);
-            // Corner accent dot
-            self.fill_circle(x + card_w - 14, y + 14, 5, blend(accent, 0x000000, 0.3));
+
+            // Controls on top-right:
+            // Dismiss button '✕'
+            let dismiss_cx = x + card_w - 16;
+            let dismiss_cy = y + 16;
+            self.fill_circle(dismiss_cx, dismiss_cy, 8, blend(0x3e3631, 0x000000, fade));
+            for d in -3i32..=3 {
+                let px1 = (dismiss_cx as i32 + d) as u32;
+                let py1 = (dismiss_cy as i32 + d) as u32;
+                let px2 = (dismiss_cx as i32 + d) as u32;
+                let py2 = (dismiss_cy as i32 - d) as u32;
+                if px1 < self.width && py1 < self.height {
+                    self.buf[(py1 * self.width + px1) as usize] = blend(0xe8e0db, 0x000000, fade);
+                }
+                if px2 < self.width && py2 < self.height {
+                    self.buf[(py2 * self.width + px2) as usize] = blend(0xe8e0db, 0x000000, fade);
+                }
+            }
+
+            // Minimize / restore button '–' / '+'
+            let min_cx = x + card_w - 36;
+            let min_cy = y + 16;
+            self.fill_circle(min_cx, min_cy, 8, blend(0x3e3631, 0x000000, fade));
+            for dx in -3i32..=3 {
+                let px = (min_cx as i32 + dx) as u32;
+                let py = min_cy;
+                if px < self.width && py < self.height {
+                    self.buf[(py * self.width + px) as usize] = blend(0xe8e0db, 0x000000, fade);
+                }
+            }
+            if is_minimized {
+                for dy in -3i32..=3 {
+                    let px = min_cx;
+                    let py = (min_cy as i32 + dy) as u32;
+                    if px < self.width && py < self.height {
+                        self.buf[(py * self.width + px) as usize] = blend(0xe8e0db, 0x000000, fade);
+                    }
+                }
+            }
+
+            // App badge if present
+            let mut title_x = x + 14;
+            if let Some(ref app) = card.app_id {
+                let badge_text = app.to_uppercase();
+                let badge_w = (badge_text.len() as u32 * 6).max(36) + 8;
+                self.fill_rect(title_x, y + 9, badge_w, 15, blend(0x38322e, accent, 0.25));
+                self.draw_text(&badge_text, (title_x + 4) as i32, (y + 11) as i32, 8.5, blend(accent, 0xffffff, 0.3), true);
+                title_x += badge_w + 6;
+            }
 
             // Title
             self.draw_text(
                 &card.title,
-                (x + 14) as i32,
-                (y + 14) as i32,
-                12.5,
-                blend(TEXT_PRIMARY, 0x000000, 1.0 - fade),
+                title_x as i32,
+                (y + 11) as i32,
+                11.5,
+                blend(if card.focused { TEXT_PRIMARY } else { TEXT_SECONDARY }, 0x000000, fade),
                 true,
             );
 
-            // Body text (word-wrap, 3 lines)
-            let body_lines = wrap_text(&card.body, 38);
-            for (li, line) in body_lines.iter().enumerate().take(3) {
-                self.draw_text(
-                    line,
-                    (x + 14) as i32,
-                    (y + 34 + li as u32 * 18) as i32,
-                    10.0,
-                    blend(TEXT_SECONDARY, 0x000000, 1.0 - fade),
-                    false,
+            if !is_minimized {
+                // Body text (word-wrap, 2 or 3 lines)
+                let max_lines = if has_actions { 2 } else { 3 };
+                let body_lines = wrap_text(&card.body, 38);
+                for (li, line) in body_lines.iter().enumerate().take(max_lines) {
+                    self.draw_text(
+                        line,
+                        (x + 14) as i32,
+                        (y + 34 + li as u32 * 17) as i32,
+                        10.0,
+                        blend(TEXT_SECONDARY, 0x000000, fade),
+                        false,
+                    );
+                }
+
+                // Render action buttons
+                if has_actions {
+                    let action_y = y + card_h - 32;
+                    let btn_gap = 8;
+                    let mut btn_x = x + 14;
+                    for (ai, action) in card.actions.iter().enumerate().take(3) {
+                        let btn_w = (action.label.len() as u32 * 7 + 22).max(75);
+                        let btn_bg = if ai == 0 && card.focused {
+                            blend(accent, 0x24201d, 0.40)
+                        } else {
+                            0x362f2a
+                        };
+                        self.fill_rect(btn_x, action_y, btn_w, 22, blend(btn_bg, 0x000000, fade));
+                        self.fill_rect(btn_x, action_y, btn_w, 1, blend(accent, 0xffffff, if ai == 0 { 0.4 } else { 0.15 }));
+                        self.draw_text(
+                            &action.label,
+                            (btn_x + 10) as i32,
+                            (action_y + 5) as i32,
+                            9.5,
+                            blend(TEXT_PRIMARY, 0x000000, fade),
+                            true,
+                        );
+                        btn_x += btn_w + btn_gap;
+                    }
+                }
+
+                // Progress bar
+                let progress = 1.0 - (card.age_ticks as f32 / card.max_age as f32);
+                let bar_w = ((card_w - 6) as f32 * progress) as u32;
+                self.fill_rect(
+                    x + 3,
+                    y + card_h - 3,
+                    bar_w,
+                    2,
+                    blend(accent, 0x000000, 0.25),
                 );
             }
 
-            // Progress bar
-            let progress = 1.0 - (card.age_ticks as f32 / card.max_age as f32);
-            let bar_w = ((card_w - 6) as f32 * progress) as u32;
-            self.fill_rect(
-                x + 3,
-                y + card_h - 3,
-                bar_w,
-                2,
-                blend(accent, 0x000000, 0.25),
-            );
+            curr_y += card_h + 10;
         }
     }
 

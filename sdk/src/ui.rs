@@ -37,6 +37,14 @@ pub struct Card {
     pub actions: Vec<CardAction>,
     pub style: CardStyle,
     pub ttl_seconds: Option<u64>, // Time to live
+    #[serde(default)]
+    pub app_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub focused: bool,
+    #[serde(default)]
+    pub minimized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +101,10 @@ impl Card {
             actions: Vec::new(),
             style: CardStyle::default(),
             ttl_seconds: None,
+            app_id: None,
+            kind: None,
+            focused: false,
+            minimized: false,
         }
     }
 
@@ -136,6 +148,26 @@ impl Card {
 
     pub fn with_metadata(mut self, key: &str, value: serde_json::Value) -> Self {
         self.metadata.insert(key.to_string(), value);
+        self
+    }
+
+    pub fn with_app_id(mut self, app_id: &str) -> Self {
+        self.app_id = Some(app_id.to_string());
+        self
+    }
+
+    pub fn with_kind(mut self, kind: &str) -> Self {
+        self.kind = Some(kind.to_string());
+        self
+    }
+
+    pub fn with_focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
+    pub fn with_minimized(mut self, minimized: bool) -> Self {
+        self.minimized = minimized;
         self
     }
 }
@@ -340,4 +372,8 @@ pub struct CardUpdates {
     pub actions: Option<Vec<CardAction>>,
     pub style: Option<CardStyle>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    pub app_id: Option<String>,
+    pub kind: Option<String>,
+    pub focused: Option<bool>,
+    pub minimized: Option<bool>,
 }

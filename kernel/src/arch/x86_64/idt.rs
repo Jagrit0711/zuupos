@@ -27,8 +27,10 @@ lazy_static! {
         idt[PIC_1_OFFSET].set_handler_fn(timer_handler);
         // Keyboard IRQ (IRQ1 → vector 0x21 / 33)
         idt[PIC_1_OFFSET + 1].set_handler_fn(keyboard_handler);
-        // Syscall (int 0x80)
-        idt[SYSCALL_VECTOR].set_handler_fn(syscall_handler);
+        // Syscall (int 0x80) - allowed from Ring 3
+        idt[SYSCALL_VECTOR]
+            .set_handler_fn(syscall_handler)
+            .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
         idt
     };
 }
