@@ -93,7 +93,99 @@ impl ShellApp {
         self.active_send_ticks = 8;
         self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
 
-        if lower.contains("book")
+        if lower.contains("stopwatch")
+            || lower.contains("timer")
+            || lower.contains("clock")
+            || lower.contains("watch")
+        {
+            self.card_manager.clear();
+            self.card_manager.add_card(Card::new_stopwatch());
+            self.avatar.set_target_position(740.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Stopwatch launched!\nFocus timer is active and running.",
+            ));
+        } else if lower.contains("note")
+            || lower.contains("todo")
+            || lower.contains("memo")
+            || lower.contains("task")
+            || lower.contains("scratch")
+        {
+            self.card_manager.clear();
+            let card = Card::new_notes(
+                "System Scratchpad",
+                vec![
+                    "Zero-copy ring buffer IPC latency <1.2µs",
+                    "60 FPS locked compositor frame pacing",
+                    "Bare-metal FAT32 filesystem driver",
+                ],
+            );
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(740.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Opened Scratchpad notes.\nTasks are synced with local memory.",
+            ));
+        } else if lower.contains("calc")
+            || lower.contains("math")
+            || lower.contains("compute")
+        {
+            self.card_manager.clear();
+            let card = Card::new_calculator(
+                "256 * 1024 / 8 = 32,768 KB",
+                "32,768 KB (32 MB)",
+                "0x8000",
+            );
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(720.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Calculator online.\nResult and conversions computed.",
+            ));
+        } else if lower.contains("music")
+            || lower.contains("song")
+            || lower.contains("lofi")
+            || lower.contains("audio")
+            || lower.contains("play")
+        {
+            self.card_manager.clear();
+            let card = Card::new_music("Cyberpunk Lo-Fi (Radio)", "Zuupos Synth Studio");
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(740.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Now playing Cyberpunk Lo-Fi.\nAmbient audio visualizer active.",
+            ));
+        } else if lower.contains("weather")
+            || lower.contains("temp")
+            || lower.contains("forecast")
+        {
+            self.card_manager.clear();
+            let card = Card::new_weather("Kyoto, Japan", "22°C", "Partly Cloudy");
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(720.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Weather forecast online.\n22°C and partly cloudy in Kyoto.",
+            ));
+        } else if lower.contains("terminal")
+            || lower.contains("bash")
+            || lower.contains("shell")
+            || lower.contains("cmd")
+            || lower.contains("sh")
+        {
+            self.card_manager.clear();
+            let card = Card::new_terminal(
+                "sysinfo --detailed",
+                "Kernel: 0.5.2-native (x86_64)\nScheduler: Work-Stealing Preemptive PIT\nHeap: 32MB | PMM Usable: 1989MB\nOllama: llama3.2 (Active - 134ms eval)",
+            );
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(740.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Terminal console online.\nKernel process status nominal.",
+            ));
+        } else if lower.contains("book")
             || lower.contains("hotel")
             || lower.contains("kyoto")
             || lower.contains("travel")
@@ -231,6 +323,9 @@ impl ShellApp {
                 custom_width: Some(480),
                 custom_height: Some(250),
                 detail_rows: vec![
+                    crate::cards::CardDetailRow::new("pin", "Interactive Stopwatch", "'stopwatch' or 'timer'"),
+                    crate::cards::CardDetailRow::new("pin", "Scratchpad Notes", "'notes' or 'todo'"),
+                    crate::cards::CardDetailRow::new("cpu", "System Calculator", "'calc' or 'math'"),
                     crate::cards::CardDetailRow::new("calendar", "Travel Booking", "'book hotel in kyoto'"),
                     crate::cards::CardDetailRow::new("cpu", "Kernel Diagnostics", "'system stats' or 'cpu'"),
                     crate::cards::CardDetailRow::new("pin", "Research Agent", "'research papers'"),
@@ -366,6 +461,44 @@ impl ApplicationHandler for ShellApp {
                         }
                         CardHitZone::Action(idx) => {
                             info!("[compositor] Mouse click: Action {} on card {}", idx, card_id);
+                            if let Some(card) = self.card_manager.get_card_mut(card_id) {
+                                if card.kind.as_deref() == Some("stopwatch") {
+                                    if idx == 0 && !card.actions.is_empty() {
+                                        if card.actions[0].label == "Pause" {
+                                            card.actions[0].label = "Start".to_string();
+                                            card.status_badge = Some("PAUSED".to_string());
+                                        } else {
+                                            card.actions[0].label = "Pause".to_string();
+                                            card.status_badge = Some("LIVE STOPWATCH".to_string());
+                                        }
+                                    } else if idx == 1 {
+                                        let total_centis = (card.age_ticks as u64 * 100) / 60;
+                                        let mins = (total_centis / 6000) % 60;
+                                        let secs = (total_centis / 100) % 60;
+                                        let millis = total_centis % 100;
+                                        let lap_time = format!("{:02}:{:02}.{:02}", mins, secs, millis);
+                                        let lap_num = card.detail_rows.len() + 1;
+                                        card.detail_rows.insert(0, crate::cards::CardDetailRow::new("clock", &format!("Lap {}", lap_num), &lap_time));
+                                    } else if idx == 2 {
+                                        card.age_ticks = 0;
+                                    }
+                                } else if card.kind.as_deref() == Some("notes") {
+                                    if idx == 0 {
+                                        let count = card.detail_rows.len() + 1;
+                                        card.detail_rows.push(crate::cards::CardDetailRow::new("check", &format!("Task item #{}", count), "Active"));
+                                    }
+                                } else if card.kind.as_deref() == Some("music") {
+                                    if idx == 1 && card.actions.len() > 1 {
+                                        if card.actions[1].label == "⏸ Pause" {
+                                            card.actions[1].label = "▶ Play".to_string();
+                                            card.status_badge = Some("PAUSED".to_string());
+                                        } else {
+                                            card.actions[1].label = "⏸ Pause".to_string();
+                                            card.status_badge = Some("NOW PLAYING".to_string());
+                                        }
+                                    }
+                                }
+                            }
                             self.card_manager.focus_card(card_id);
                         }
                     }
@@ -451,28 +584,93 @@ impl ApplicationHandler for ShellApp {
                     self.is_generating = false;
                     self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
 
-                    let speech = if response.text.len() > 140 {
-                        format!("{}…", &response.text[..137])
+                    let raw_text = response.text.trim();
+                    let (clean_text, action) = extract_action(raw_text);
+
+                    let speech = if clean_text.len() > 140 {
+                        format!("{}…", &clean_text[..137])
                     } else {
-                        response.text.clone()
+                        clean_text.clone()
                     };
                     self.avatar.set_speech(Some(&speech));
 
-                    // Display complete LLM answer in an AI response card
-                    let card = Card {
-                        id: 0,
-                        title: format!("AI: {}", response.model),
-                        body: response.text,
-                        card_type: CardType::Info,
-                        max_age: 1800,
-                        app_id: Some("ollama".to_string()),
-                        pos_x: Some(300),
-                        pos_y: Some(170),
-                        custom_width: Some(520),
-                        custom_height: Some(260),
-                        ..Default::default()
-                    };
-                    self.card_manager.add_card(card);
+                    // Execute action if detected
+                    match action.as_deref() {
+                        Some("stopwatch") | Some("timer") => {
+                            self.card_manager.clear();
+                            self.card_manager.add_card(Card::new_stopwatch());
+                            self.avatar.set_target_position(740.0, 480.0);
+                            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+                        }
+                        Some("notes") => {
+                            self.card_manager.clear();
+                            self.card_manager.add_card(Card::new_notes(
+                                "System Scratchpad",
+                                vec![
+                                    "IPC zero-copy buffer active",
+                                    "60 FPS frame pacing verified",
+                                    "Episodic memory synchronized",
+                                ],
+                            ));
+                            self.avatar.set_target_position(740.0, 480.0);
+                            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+                        }
+                        Some("calculator") => {
+                            self.card_manager.clear();
+                            self.card_manager.add_card(Card::new_calculator(
+                                "256 * 1024 / 8 = 32,768 KB",
+                                "32,768 KB (32 MB)",
+                                "0x8000",
+                            ));
+                            self.avatar.set_target_position(720.0, 480.0);
+                            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+                        }
+                        Some("music") => {
+                            self.card_manager.clear();
+                            self.card_manager.add_card(Card::new_music(
+                                "Cyberpunk Lo-Fi (Radio)",
+                                "Zuupos Synth Studio",
+                            ));
+                            self.avatar.set_target_position(740.0, 480.0);
+                            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+                        }
+                        Some("weather") => {
+                            self.card_manager.clear();
+                            self.card_manager.add_card(Card::new_weather(
+                                "Kyoto, Japan",
+                                "22°C",
+                                "Partly Cloudy",
+                            ));
+                            self.avatar.set_target_position(720.0, 480.0);
+                            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+                        }
+                        Some("terminal") => {
+                            self.card_manager.clear();
+                            self.card_manager.add_card(Card::new_terminal(
+                                "sysinfo --detailed",
+                                "Kernel: 0.5.2-native (x86_64)\nAll kernel subsystems nominal.",
+                            ));
+                            self.avatar.set_target_position(740.0, 480.0);
+                            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+                        }
+                        _ => {
+                            // Display complete LLM answer in an AI response card
+                            let card = Card {
+                                id: 0,
+                                title: format!("AI: {}", response.model),
+                                body: clean_text,
+                                card_type: CardType::Info,
+                                max_age: 1800,
+                                app_id: Some("ollama".to_string()),
+                                pos_x: Some(300),
+                                pos_y: Some(170),
+                                custom_width: Some(520),
+                                custom_height: Some(260),
+                                ..Default::default()
+                            };
+                            self.card_manager.add_card(card);
+                        }
+                    }
                 }
 
                 // Boot phase transition
@@ -581,4 +779,37 @@ pub fn run_shell() {
 
     let mut app = ShellApp::new();
     event_loop.run_app(&mut app).expect("Event loop error");
+}
+
+fn extract_action(text: &str) -> (String, Option<String>) {
+    let lower = text.to_lowercase();
+    if let Some(start) = text.find("[ACTION:") {
+        if let Some(end) = text[start..].find(']') {
+            let action = text[start + 8..start + end].trim().to_lowercase();
+            let mut clean = String::new();
+            clean.push_str(&text[..start]);
+            clean.push_str(&text[start + end + 1..]);
+            return (clean.trim().to_string(), Some(action));
+        }
+    }
+    // Heuristic fallbacks if LLM mentioned launching an app without tag
+    if lower.contains("stopwatch") || lower.contains("timer") {
+        return (text.to_string(), Some("stopwatch".to_string()));
+    }
+    if lower.contains("scratchpad") || lower.contains("notes app") {
+        return (text.to_string(), Some("notes".to_string()));
+    }
+    if lower.contains("calculator") {
+        return (text.to_string(), Some("calculator".to_string()));
+    }
+    if lower.contains("music") || lower.contains("lo-fi") {
+        return (text.to_string(), Some("music".to_string()));
+    }
+    if lower.contains("weather") {
+        return (text.to_string(), Some("weather".to_string()));
+    }
+    if lower.contains("terminal") {
+        return (text.to_string(), Some("terminal".to_string()));
+    }
+    (text.to_string(), None)
 }

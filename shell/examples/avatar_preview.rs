@@ -334,4 +334,102 @@ fn main() {
         }
         save_png(&sys_renderer, &out_dir.join("system_diagnostics_spawned.png"));
     }
+
+    // ── 5. Interactive Stopwatch App Card ────────────────────────────────────
+    {
+        let mut stopwatch_card = Card::new_stopwatch();
+        stopwatch_card.age_ticks = 2480; // ~41.33 seconds
+        let sw_cards = vec![&stopwatch_card];
+        let mut sw_renderer = Renderer::new_headless(fw, fh);
+        sw_renderer.theme_mode = ThemeMode::Light;
+        let mut sw_avatar = Avatar::new();
+        sw_avatar.set_position(740.0, 480.0);
+        sw_avatar.set_emotion(Emotion::Happy);
+        sw_avatar.set_speech(Some(
+            "Stopwatch launched!\nFocus timer is active and running.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            sw_avatar.tick(tick, fw, fh);
+            sw_renderer.render(tick, &sw_cards, &sw_avatar, false);
+        }
+        save_png(&sw_renderer, &out_dir.join("stopwatch_app_spawned.png"));
+    }
+
+    // ── 6. Scratchpad Notes App Card ─────────────────────────────────────────
+    {
+        let notes_card = Card::new_notes(
+            "System Scratchpad",
+            vec![
+                "Zero-copy ring buffer IPC latency <1.2µs",
+                "60 FPS locked compositor frame pacing",
+                "Bare-metal FAT32 filesystem driver",
+            ],
+        );
+        let notes_cards = vec![&notes_card];
+        let mut notes_renderer = Renderer::new_headless(fw, fh);
+        notes_renderer.theme_mode = ThemeMode::Light;
+        let mut notes_avatar = Avatar::new();
+        notes_avatar.set_position(740.0, 480.0);
+        notes_avatar.set_emotion(Emotion::Happy);
+        notes_avatar.set_speech(Some(
+            "Opened Scratchpad notes.\nTasks are synced with local memory.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            notes_avatar.tick(tick, fw, fh);
+            notes_renderer.render(tick, &notes_cards, &notes_avatar, false);
+        }
+        save_png(&notes_renderer, &out_dir.join("notes_app_spawned.png"));
+    }
+
+    // ── 7. System Calculator App Card ────────────────────────────────────────
+    {
+        let calc_card = Card::new_calculator(
+            "256 * 1024 / 8 = 32,768 KB",
+            "32,768 KB (32 MB)",
+            "0x8000",
+        );
+        let calc_cards = vec![&calc_card];
+        let mut calc_renderer = Renderer::new_headless(fw, fh);
+        calc_renderer.theme_mode = ThemeMode::Light;
+        let mut calc_avatar = Avatar::new();
+        calc_avatar.set_position(720.0, 480.0);
+        calc_avatar.set_emotion(Emotion::Happy);
+        calc_avatar.set_speech(Some(
+            "Calculator online.\nResult and conversions computed.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            calc_avatar.tick(tick, fw, fh);
+            calc_renderer.render(tick, &calc_cards, &calc_avatar, false);
+        }
+        save_png(&calc_renderer, &out_dir.join("calculator_app_spawned.png"));
+    }
+
+    // ── 8. Cyberpunk Lo-Fi Music Player Card ─────────────────────────────────
+    {
+        let music_card = Card::new_music("Cyberpunk Lo-Fi (Radio)", "Zuupos Synth Studio");
+        let music_cards = vec![&music_card];
+        let mut music_renderer = Renderer::new_headless(fw, fh);
+        music_renderer.theme_mode = ThemeMode::Light;
+        let mut music_avatar = Avatar::new();
+        music_avatar.set_position(740.0, 480.0);
+        music_avatar.set_emotion(Emotion::Happy);
+        music_avatar.set_speech(Some(
+            "Now playing Cyberpunk Lo-Fi.\nAmbient audio visualizer active.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            music_avatar.tick(tick, fw, fh);
+            music_renderer.render(tick, &music_cards, &music_avatar, false);
+        }
+        save_png(&music_renderer, &out_dir.join("music_app_spawned.png"));
+    }
 }
+
+

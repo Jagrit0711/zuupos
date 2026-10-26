@@ -13,6 +13,11 @@ pub enum CardType {
     Plan,
     Booking,
     Gallery,
+    Stopwatch,
+    Notes,
+    Calculator,
+    Music,
+    Terminal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -134,6 +139,184 @@ impl Card {
             pos_y: None,
             custom_width: Some(440),
             custom_height: Some(435),
+        }
+    }
+
+    pub fn new_stopwatch() -> Self {
+        Self {
+            id: 0,
+            title: "Stopwatch".to_string(),
+            body: String::new(),
+            card_type: CardType::Stopwatch,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("clock".to_string()),
+            kind: Some("stopwatch".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("Pause", "toggle_timer"),
+                CardAction::new("Lap", "lap_timer"),
+                CardAction::new("Reset", "reset_timer"),
+            ],
+            subtitle: Some("Active Focus Session".to_string()),
+            status_badge: Some("LIVE STOPWATCH".to_string()),
+            detail_rows: vec![
+                CardDetailRow::new("clock", "Lap 1", "00:08.45"),
+                CardDetailRow::new("pin", "Focus Goal", "Deep Work (Rust OS)"),
+            ],
+            gallery_images: Vec::new(),
+            pos_x: Some(440),
+            pos_y: Some(170),
+            custom_width: Some(380),
+            custom_height: Some(250),
+        }
+    }
+
+    pub fn new_notes(title: &str, items: Vec<&str>) -> Self {
+        let details = items
+            .into_iter()
+            .map(|item| CardDetailRow::new("check", item, "Active"))
+            .collect();
+
+        Self {
+            id: 0,
+            title: title.to_string(),
+            body: "Autonomous scratchpad synced with agentd memory.".to_string(),
+            card_type: CardType::Notes,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("notes".to_string()),
+            kind: Some("notes".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("+ New Task", "add_task"),
+                CardAction::new("Copy All", "copy_notes"),
+            ],
+            subtitle: Some("System Scratchpad".to_string()),
+            status_badge: Some("SYNCED".to_string()),
+            detail_rows: details,
+            gallery_images: Vec::new(),
+            pos_x: Some(400),
+            pos_y: Some(160),
+            custom_width: Some(420),
+            custom_height: Some(270),
+        }
+    }
+
+    pub fn new_calculator(expr: &str, result: &str, hex: &str) -> Self {
+        Self {
+            id: 0,
+            title: "Calculator".to_string(),
+            body: expr.to_string(),
+            card_type: CardType::Calculator,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("calc".to_string()),
+            kind: Some("calculator".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("Copy", "copy_calc"),
+                CardAction::new("Clear", "clear_calc"),
+            ],
+            subtitle: Some(format!("Result: {}", result)),
+            status_badge: Some("COMPUTED".to_string()),
+            detail_rows: vec![
+                CardDetailRow::new("pin", "Decimal", result),
+                CardDetailRow::new("cpu", "Hexadecimal", hex),
+            ],
+            gallery_images: Vec::new(),
+            pos_x: Some(450),
+            pos_y: Some(180),
+            custom_width: Some(360),
+            custom_height: Some(230),
+        }
+    }
+
+    pub fn new_music(track: &str, artist: &str) -> Self {
+        Self {
+            id: 0,
+            title: track.to_string(),
+            body: "Synthesized lo-fi stream for deep engineering focus.".to_string(),
+            card_type: CardType::Music,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("media".to_string()),
+            kind: Some("music".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("⏮ Prev", "prev_track"),
+                CardAction::new("⏸ Pause", "toggle_play"),
+                CardAction::new("⏭ Next", "next_track"),
+            ],
+            subtitle: Some(artist.to_string()),
+            status_badge: Some("NOW PLAYING".to_string()),
+            detail_rows: vec![
+                CardDetailRow::new("wave", "Bitrate", "320 kbps FLAC"),
+                CardDetailRow::new("clock", "Elapsed", "01:42 / 03:30"),
+            ],
+            gallery_images: Vec::new(),
+            pos_x: Some(420),
+            pos_y: Some(170),
+            custom_width: Some(400),
+            custom_height: Some(255),
+        }
+    }
+
+    pub fn new_weather(city: &str, temp: &str, condition: &str) -> Self {
+        Self {
+            id: 0,
+            title: city.to_string(),
+            body: format!("Current conditions: {}. Perfect weather for deep coding.", condition),
+            card_type: CardType::Weather,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("weather".to_string()),
+            kind: Some("weather".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![CardAction::new("Hourly", "hourly"), CardAction::new("7-Day", "weekly")],
+            subtitle: Some(format!("{} • {}", temp, condition)),
+            status_badge: Some("LIVE WEATHER".to_string()),
+            detail_rows: vec![
+                CardDetailRow::new("pin", "Humidity", "48%"),
+                CardDetailRow::new("cloud", "Wind", "8 km/h NW"),
+            ],
+            gallery_images: Vec::new(),
+            pos_x: Some(430),
+            pos_y: Some(170),
+            custom_width: Some(360),
+            custom_height: Some(230),
+        }
+    }
+
+    pub fn new_terminal(cmd: &str, output: &str) -> Self {
+        Self {
+            id: 0,
+            title: format!("$ {}", cmd),
+            body: output.to_string(),
+            card_type: CardType::Terminal,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("terminal".to_string()),
+            kind: Some("terminal".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![CardAction::new("Run Diagnostics", "run_diag"), CardAction::new("Clear", "clear_term")],
+            subtitle: Some("PID 1 • x86_64 User Stack".to_string()),
+            status_badge: Some("EXECUTED (0ms)".to_string()),
+            detail_rows: vec![
+                CardDetailRow::new("cpu", "Context Switch", "<1.2µs"),
+                CardDetailRow::new("mem", "Exit Code", "0 (SUCCESS)"),
+            ],
+            gallery_images: Vec::new(),
+            pos_x: Some(340),
+            pos_y: Some(150),
+            custom_width: Some(520),
+            custom_height: Some(280),
         }
     }
 }
@@ -289,6 +472,10 @@ impl CardManager {
         self.cards.iter_mut().find(|c| c.id == fid)
     }
 
+    pub fn get_card_mut(&mut self, id: u64) -> Option<&mut Card> {
+        self.cards.iter_mut().find(|c| c.id == id)
+    }
+
     pub fn tick(&mut self) {
         for card in &mut self.cards {
             // Keep focused card alive longer while the user is reading/interacting
@@ -323,47 +510,39 @@ impl CardManager {
 
     /// Tests whether a screen coordinate falls within a card and identifies the zone.
     pub fn hit_test(&self, mx: u32, my: u32, screen_w: u32) -> Option<(u64, CardHitZone)> {
-        let card_w: u32 = 340;
+        let default_w: u32 = 340;
         let margin: u32 = 16;
         let statusbar_h: u32 = 32;
-        let start_x = screen_w.saturating_sub(card_w + margin);
+        let default_x = screen_w.saturating_sub(default_w + margin);
         let mut curr_y = statusbar_h + margin;
 
-        for card in &self.cards {
+        for card in self.cards.iter().rev() {
+            let card_w = card.custom_width.unwrap_or(default_w);
             let card_h = if card.minimized {
                 36
-            } else if !card.actions.is_empty() {
-                142
             } else {
-                115
+                card.custom_height.unwrap_or(if !card.actions.is_empty() {
+                    142
+                } else {
+                    115
+                })
             };
+            let x = card.pos_x.map(|px| px as u32).unwrap_or(default_x);
+            let y = card.pos_y.map(|py| py as u32).unwrap_or(curr_y);
 
-            if mx >= start_x && mx <= start_x + card_w && my >= curr_y && my <= curr_y + card_h {
-                // Check dismiss button (top right: [x + card_w - 26, x + card_w - 6], [y + 6, y + 26])
-                if mx >= start_x + card_w - 26
-                    && mx <= start_x + card_w - 6
-                    && my >= curr_y + 6
-                    && my <= curr_y + 26
-                {
+            if mx >= x && mx <= x + card_w && my >= y && my <= y + card_h {
+                // Check dismiss button (top right: [x + card_w - 28, x + card_w - 6], [y + 6, y + 28])
+                if mx >= x + card_w - 28 && mx <= x + card_w - 6 && my >= y + 6 && my <= y + 28 {
                     return Some((card.id, CardHitZone::Dismiss));
                 }
 
-                // Check minimize toggle button (next to dismiss: [x + card_w - 50, x + card_w - 30], [y + 6, y + 26])
-                if mx >= start_x + card_w - 50
-                    && mx <= start_x + card_w - 30
-                    && my >= curr_y + 6
-                    && my <= curr_y + 26
-                {
-                    return Some((card.id, CardHitZone::MinimizeToggle));
-                }
-
-                // If not minimized and has actions, check action buttons along bottom
+                // Check action buttons along bottom
                 if !card.minimized && !card.actions.is_empty() {
-                    let action_y = curr_y + card_h - 32;
-                    if my >= action_y && my <= curr_y + card_h - 6 {
-                        let btn_w = 90;
-                        let btn_gap = 8;
-                        let start_btn_x = start_x + 14;
+                    let action_y = y + card_h - 48;
+                    if my >= action_y && my <= y + card_h {
+                        let btn_w = 100;
+                        let btn_gap = 12;
+                        let start_btn_x = x + 24;
                         for (idx, _) in card.actions.iter().enumerate() {
                             let bx = start_btn_x + idx as u32 * (btn_w + btn_gap);
                             if mx >= bx && mx <= bx + btn_w {
@@ -376,7 +555,9 @@ impl CardManager {
                 return Some((card.id, CardHitZone::CardBody));
             }
 
-            curr_y += card_h + 10;
+            if card.pos_y.is_none() {
+                curr_y += card_h + 10;
+            }
         }
 
         None

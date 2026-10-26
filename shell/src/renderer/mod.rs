@@ -579,6 +579,11 @@ impl Renderer {
                 CardType::Plan => (CARD_BG_PLAN, ACCENT_GREEN),
                 CardType::Booking => (0x121e18, ACCENT_GREEN),
                 CardType::Gallery => (0x151824, ACCENT_BLUE),
+                CardType::Stopwatch => (0x121e18, ACCENT_CYAN),
+                CardType::Notes => (0x1e1c24, ACCENT_BLUE),
+                CardType::Calculator => (0x241e15, ACCENT_AMBER),
+                CardType::Music => (0x1f1628, ACCENT_PRIMARY),
+                CardType::Terminal => (0x0f172a, ACCENT_GREEN),
             };
 
             let bg_alpha = if card.focused { 0.94 } else { 0.78 } * fade;
@@ -740,18 +745,51 @@ impl Renderer {
         }
     }
 
-    fn draw_cards_light(&mut self, cards: &[&Card], _tick: u64) {
+    fn draw_cards_light(&mut self, cards: &[&Card], tick: u64) {
         let mut curr_y = 140u32;
         let default_x = self.width.saturating_sub(380);
 
         for card in cards.iter() {
             let is_booking = card.card_type == CardType::Booking;
             let is_gallery = card.card_type == CardType::Gallery;
+            let is_stopwatch = card.card_type == CardType::Stopwatch;
+            let is_notes = card.card_type == CardType::Notes;
+            let is_calculator = card.card_type == CardType::Calculator;
+            let is_music = card.card_type == CardType::Music;
+            let is_terminal = card.card_type == CardType::Terminal;
+            let is_weather = card.card_type == CardType::Weather;
 
-            let card_w = card.custom_width.unwrap_or(if is_gallery { 440 } else { 330 });
-            let card_h = card.custom_height.unwrap_or(if is_gallery { 430 } else if is_booking { 255 } else { 120 });
+            let card_w = card.custom_width.unwrap_or(if is_gallery {
+                440
+            } else if is_terminal {
+                520
+            } else if is_notes {
+                420
+            } else if is_stopwatch {
+                380
+            } else if is_music {
+                390
+            } else {
+                340
+            });
+
+            let card_h = card.custom_height.unwrap_or(if is_gallery {
+                430
+            } else if is_booking {
+                255
+            } else if is_terminal {
+                280
+            } else if is_notes {
+                260
+            } else if is_stopwatch {
+                240
+            } else if is_music {
+                240
+            } else {
+                200
+            });
+
             let radius = 26.0f32;
-
             let x = card.pos_x.map(|px| px as u32).unwrap_or(default_x);
             let base_y = card.pos_y.map(|py| py as u32).unwrap_or(curr_y);
 
@@ -776,7 +814,7 @@ impl Renderer {
                 // Hotel Name
                 self.draw_text(&card.title, (x + 26) as i32, (y + 56) as i32, 21.0, 0x181a1f, true);
 
-                // Location Subtitle: 📍 1 Ogocho, Kita Ward
+                // Location Subtitle
                 if let Some(sub) = &card.subtitle {
                     self.draw_pin_icon(x + 26, y + 88, 0x94a3b8);
                     self.draw_text(sub, (x + 44) as i32, (y + 86) as i32, 12.0, 0x64748b, false);
@@ -815,21 +853,196 @@ impl Renderer {
                         self.blit_image_rounded(img_path, img_x, img_y, tile_w, tile_h, 14.0);
                     }
                 }
+            } else if is_stopwatch {
+                // Top status badge: (✓) LIVE STOPWATCH
+                self.draw_check_badge(x + 24, y + 22, "LIVE STOPWATCH");
+                if let Some(ref sub) = card.subtitle {
+                    self.draw_text(sub, (x + card_w - 150) as i32, (y + 24) as i32, 10.5, 0x64748b, false);
+                }
+
+                // Real running time computed from card.age_ticks (60 ticks/s)
+                let total_centis = (card.age_ticks as u64 * 100) / 60;
+                let mins = (total_centis / 6000) % 60;
+                let secs = (total_centis / 100) % 60;
+                let millis = total_centis % 100;
+                let time_str = format!("{:02}:{:02}.{:02}", mins, secs, millis);
+                self.draw_text(&time_str, (x + 24) as i32, (y + 54) as i32, 28.0, 0x0f172a, true);
+
+                // Animated focus progress bar
+                let bar_w = card_w - 48;
+                self.fill_rounded_rect(x + 24, y + 100, bar_w, 4, 2.0, 0xe2e8f0, 1.0, None);
+                let fill_w = (((card.age_ticks % 600) as f32 / 600.0) * bar_w as f32) as u32;
+                self.fill_rounded_rect(x + 24, y + 100, fill_w.max(6), 4, 2.0, 0x5164f5, 1.0, None);
+
+                // Laps
+                for (i, row) in card.detail_rows.iter().enumerate().take(2) {
+                    let ry = y + 116 + i as u32 * 26;
+                    self.draw_text(&row.label, (x + 24) as i32, ry as i32, 11.0, 0x64748b, true);
+                    self.draw_text(&row.value, (x + card_w - 110) as i32, ry as i32, 11.5, 0x1e293b, false);
+                }
+
+                // Interactive action buttons: [ Pause ] [ Lap ] [ Reset ]
+                let btn_y = y + card_h - 44;
+                let btn_w = 95u32;
+                let btn_h = 30u32;
+                let mut bx = x + 24;
+                for (ai, action) in card.actions.iter().enumerate().take(3) {
+                    let bg = if ai == 0 { 0x5164f5 } else { 0xf1f5f9 };
+                    let fg = if ai == 0 { 0xffffff } else { 0x334155 };
+                    self.fill_rounded_rect(bx, btn_y, btn_w, btn_h, 15.0, bg, 1.0, None);
+                    let tw = (action.label.len() as u32 * 6).max(20);
+                    let tx = bx + (btn_w.saturating_sub(tw)) / 2;
+                    self.draw_text(&action.label, tx as i32, (btn_y + 8) as i32, 10.5, fg, true);
+                    bx += btn_w + 12;
+                }
+            } else if is_notes {
+                // Top status badge: (✓) SCRATCHPAD
+                self.draw_check_badge(x + 24, y + 22, "SCRATCHPAD");
+                self.draw_text(&card.title, (x + 24) as i32, (y + 52) as i32, 16.0, 0x0f172a, true);
+
+                // Items list with check icons
+                for (i, row) in card.detail_rows.iter().enumerate().take(3) {
+                    let ry = y + 84 + (i as u32 * 34);
+                    self.fill_circle(x + 34, ry + 8, 7, 0xecfdf5);
+                    self.fill_circle(x + 34, ry + 8, 3, 0x10b981);
+                    self.draw_text(&row.label, (x + 50) as i32, (ry + 2) as i32, 11.5, 0x1e293b, true);
+                    self.draw_text(&row.value, (x + card_w - 70) as i32, (ry + 2) as i32, 10.0, 0x64748b, false);
+                }
+
+                // Action buttons
+                let btn_y = y + card_h - 44;
+                let mut bx = x + 24;
+                for (ai, action) in card.actions.iter().enumerate().take(2) {
+                    let bg = if ai == 0 { 0x5164f5 } else { 0xf1f5f9 };
+                    let fg = if ai == 0 { 0xffffff } else { 0x334155 };
+                    let bw = 110u32;
+                    self.fill_rounded_rect(bx, btn_y, bw, 30, 15.0, bg, 1.0, None);
+                    self.draw_text(&action.label, (bx + 18) as i32, (btn_y + 8) as i32, 10.5, fg, true);
+                    bx += bw + 12;
+                }
+            } else if is_calculator {
+                self.draw_check_badge(x + 24, y + 22, "CALCULATOR");
+                self.draw_text(&card.body, (x + 24) as i32, (y + 50) as i32, 12.5, 0x64748b, false);
+                if let Some(ref sub) = card.subtitle {
+                    self.draw_text(sub, (x + 24) as i32, (y + 72) as i32, 22.0, 0x0f172a, true);
+                }
+                for (i, row) in card.detail_rows.iter().enumerate().take(2) {
+                    let ry = y + 116 + i as u32 * 26;
+                    self.draw_text(&row.label, (x + 24) as i32, ry as i32, 11.0, 0x64748b, true);
+                    self.draw_text(&row.value, (x + 130) as i32, ry as i32, 11.5, 0x1e293b, false);
+                }
+                let btn_y = y + card_h - 44;
+                let mut bx = x + 24;
+                for action in card.actions.iter().take(2) {
+                    let bw = 85u32;
+                    self.fill_rounded_rect(bx, btn_y, bw, 30, 15.0, 0xf1f5f9, 1.0, None);
+                    self.draw_text(&action.label, (bx + 16) as i32, (btn_y + 8) as i32, 10.5, 0x334155, true);
+                    bx += bw + 10;
+                }
+            } else if is_music {
+                self.draw_check_badge(x + 24, y + 22, "NOW PLAYING");
+                self.fill_rounded_rect(x + 24, y + 54, 46, 46, 12.0, 0x8b5cf6, 1.0, None);
+                self.fill_circle(x + 47, y + 77, 10, 0xffffff);
+                self.fill_circle(x + 47, y + 77, 4, 0x8b5cf6);
+
+                self.draw_text(&card.title, (x + 80) as i32, (y + 54) as i32, 14.5, 0x0f172a, true);
+                if let Some(ref sub) = card.subtitle {
+                    self.draw_text(sub, (x + 80) as i32, (y + 76) as i32, 11.5, 0x64748b, false);
+                }
+
+                // Animated Equalizer Bars
+                for b in 0..14 {
+                    let bar_x = x + 80 + b * 18;
+                    let phase = (tick as f32 * 0.18 + b as f32 * 0.75).sin().abs();
+                    let h = 4 + (phase * 20.0) as u32;
+                    let bar_y = y + 134 - h;
+                    self.fill_rounded_rect(bar_x, bar_y, 8, h, 4.0, 0x8b5cf6, 0.85, None);
+                }
+
+                let btn_y = y + card_h - 44;
+                let mut bx = x + 24;
+                for action in card.actions.iter().take(3) {
+                    let bw = 90u32;
+                    self.fill_rounded_rect(bx, btn_y, bw, 30, 15.0, 0xf1f5f9, 1.0, None);
+                    self.draw_text(&action.label, (bx + 18) as i32, (btn_y + 8) as i32, 10.5, 0x334155, true);
+                    bx += bw + 10;
+                }
+            } else if is_terminal {
+                self.draw_check_badge(x + 24, y + 20, "KERNEL PID 1");
+                self.draw_text(&card.title, (x + 130) as i32, (y + 22) as i32, 11.5, 0x64748b, true);
+
+                let term_w = card_w - 48;
+                let term_h = 135u32;
+                self.fill_rounded_rect(x + 24, y + 46, term_w, term_h, 12.0, 0x0f172a, 1.0, None);
+
+                self.draw_text("zuupos@host:~$ sysinfo", (x + 36) as i32, (y + 58) as i32, 10.5, 0x10b981, true);
+                let term_lines = wrap_text(&card.body, 48);
+                for (li, line) in term_lines.iter().enumerate().take(4) {
+                    self.draw_text(line, (x + 36) as i32, (y + 78 + li as u32 * 17) as i32, 10.0, 0xe2e8f0, false);
+                }
+
+                let btn_y = y + card_h - 44;
+                let mut bx = x + 24;
+                for action in card.actions.iter().take(2) {
+                    let bw = 120u32;
+                    self.fill_rounded_rect(bx, btn_y, bw, 30, 15.0, 0xf1f5f9, 1.0, None);
+                    self.draw_text(&action.label, (bx + 14) as i32, (btn_y + 8) as i32, 10.5, 0x334155, true);
+                    bx += bw + 12;
+                }
+            } else if is_weather {
+                self.draw_check_badge(x + 24, y + 22, "LIVE WEATHER");
+                self.draw_text(&card.title, (x + 24) as i32, (y + 52) as i32, 16.0, 0x0f172a, true);
+                if let Some(ref sub) = card.subtitle {
+                    self.draw_text(sub, (x + 24) as i32, (y + 74) as i32, 20.0, 0x5164f5, true);
+                }
+                for (i, row) in card.detail_rows.iter().enumerate().take(2) {
+                    let ry = y + 116 + i as u32 * 26;
+                    self.draw_text(&row.label, (x + 24) as i32, ry as i32, 11.0, 0x64748b, true);
+                    self.draw_text(&row.value, (x + 130) as i32, ry as i32, 11.5, 0x1e293b, false);
+                }
+                let btn_y = y + card_h - 44;
+                let mut bx = x + 24;
+                for action in card.actions.iter().take(2) {
+                    let bw = 85u32;
+                    self.fill_rounded_rect(bx, btn_y, bw, 30, 15.0, 0xf1f5f9, 1.0, None);
+                    self.draw_text(&action.label, (bx + 16) as i32, (btn_y + 8) as i32, 10.5, 0x334155, true);
+                    bx += bw + 10;
+                }
             } else {
-                // Generic Card in Light Mode
-                let mut title_x = x + 20;
+                // Generic Card (AI Answers, Research, Help)
+                let mut title_x = x + 24;
                 if let Some(ref app) = card.app_id {
                     let badge_text = app.to_uppercase();
-                    let badge_w = (badge_text.len() as u32 * 6).max(36) + 8;
-                    self.fill_rounded_rect(title_x, y + 14, badge_w, 16, 4.0, 0xedf2f7, 1.0, None);
-                    self.draw_text(&badge_text, (title_x + 4) as i32, (y + 16) as i32, 8.5, 0x4a5568, true);
-                    title_x += badge_w + 8;
+                    let badge_w = (badge_text.len() as u32 * 6).max(36) + 12;
+                    self.fill_rounded_rect(title_x, y + 20, badge_w, 18, 9.0, 0xeff6ff, 1.0, Some(0xbfdbfe));
+                    self.draw_text(&badge_text, (title_x + 6) as i32, (y + 23) as i32, 9.0, 0x1d4ed8, true);
+                    title_x += badge_w + 10;
                 }
-                self.draw_text(&card.title, title_x as i32, (y + 16) as i32, 12.0, 0x1a202c, true);
+                self.draw_text(&card.title, title_x as i32, (y + 22) as i32, 13.0, 0x1a202c, true);
 
-                let body_lines = wrap_text(&card.body, 36);
-                for (li, line) in body_lines.iter().enumerate().take(3) {
-                    self.draw_text(line, (x + 20) as i32, (y + 44 + li as u32 * 18) as i32, 10.0, 0x4a5568, false);
+                let body_lines = wrap_text(&card.body, 48);
+                for (li, line) in body_lines.iter().enumerate().take(6) {
+                    self.draw_text(line, (x + 24) as i32, (y + 54 + li as u32 * 18) as i32, 10.5, 0x334155, false);
+                }
+
+                if !card.detail_rows.is_empty() {
+                    let start_dy = y + 54 + (body_lines.len().min(4) as u32 * 18) + 8;
+                    for (di, row) in card.detail_rows.iter().enumerate().take(2) {
+                        let dy = start_dy + di as u32 * 24;
+                        self.draw_text(&row.label, (x + 24) as i32, dy as i32, 10.5, 0x64748b, true);
+                        self.draw_text(&row.value, (x + card_w - 140) as i32, dy as i32, 10.5, 0x1e293b, false);
+                    }
+                }
+
+                if !card.actions.is_empty() {
+                    let btn_y = y + card_h - 42;
+                    let mut bx = x + 24;
+                    for action in card.actions.iter().take(2) {
+                        let bw = 100u32;
+                        self.fill_rounded_rect(bx, btn_y, bw, 28, 14.0, 0xf1f5f9, 1.0, None);
+                        self.draw_text(&action.label, (bx + 14) as i32, (btn_y + 7) as i32, 10.0, 0x334155, true);
+                        bx += bw + 10;
+                    }
                 }
             }
 

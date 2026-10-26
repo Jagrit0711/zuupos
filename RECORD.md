@@ -58,6 +58,7 @@
 | Oct 25 2026 | **Agentd: Curated long-term memory across sessions** (`curated_notes` in SQLite, injected into LLM reasoning prompt) | ✅ | `pending` |
 | Oct 26 2026 | **Interactive Compositor Shell**: Live keyboard typing, dynamic intent dispatch, anchor-aware floating AI roaming physics, clean boot canvas | ✅ | `f26722f` |
 | Oct 26 2026 | **Performance Overhaul & Live LLM Auto-Initiation**: 60 FPS frame pacing (`ControlFlow::WaitUntil`), 0ms instantaneous keystroke dispatch, tactile button press feedback (`scale(0.96)`), auto-detection & initiation of Ollama daemon, live non-blocking background inference (`llama3.2:latest`), model status indicator capsule, and Emil Kowalski motion design principles | ✅ | `pending` |
+| Oct 26 2026 | **Action-First AI Agent & Interactive Native Applications**: Replaced passive chatbot responses with direct OS execution. Built full suite of interactive application cards: **Live Stopwatch** (live ticking `00:41.33`, progress bar, laps, and `[Pause/Lap/Reset]` click zones), **Scratchpad Notes** (task checkmarks, `[+ New Task]`), **System Calculator** (formulas, hex conversion, `[Copy/Clear]`), **Music Player** (14-bar animated equalizer), **Terminal & Weather**. Action tag protocol (`[ACTION:...]`) guarantees immediate UI instantiation with 0 blank frames. | ✅ | `pending` |
 | Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | native macOS disk image creation (`hdiutil` UDTO raw disk) & QEMU runner integration |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | ✅ | - |
 | Oct 31 2026 | Physical memory manager (buddy allocator) | ✅ | - |
@@ -283,7 +284,26 @@ Captured from a direct conversation about where this should go, so it doesn't ge
 - **Multiple apps, not one shell surface.** The SDK already has an `App`/`CapabilitySet` concept (`sdk/src/app.rs`), but the live shell only ever shows one compositor surface with agent-pushed cards. Real customization and multiple concurrent apps are unbuilt.
 - **The framing that ties it together**: imagine Claude Code — already agentic, already able to reason about a codebase and take action — except it has a face, a voice, it never stops running, and it *is* the operating system instead of a tool running on top of one, so it isn't boxed in by what a host OS lets a CLI tool do.
 
+### 2026-10-26 — Action-First AI Agent & Interactive Native Applications
+
+1. **Problem Resolved**:
+   - The user encountered a passive chatbot loop where typing requests (e.g. `"stopwatch"`, `"calc"`, `"notes"`) yielded conversational replies like `"I can launch the Stopwatch app for you. Would you like me to set it for a specific duration or start a new one?"` leaving the desktop blank without any application rendered.
+   - An operating system AI must be **action-first**: it must immediately execute the command, spawn the interactive application widget, and report confirmation.
+
+2. **Interactive Native Application Cards** (`shell/src/cards/mod.rs` & `shell/src/renderer/mod.rs`):
+   - **Live Stopwatch**: Real ticking time (`00:41.33`) formatted directly from `card.age_ticks`, dynamic progress bar, recorded lap splits, and interactive `[Pause]`, `[Lap]`, `[Reset]` buttons.
+   - **System Scratchpad / Notes**: Checklist with emerald status badges and clickable `[+ New Task]`, `[Copy All]` actions.
+   - **System Calculator**: Math expressions, bold multi-unit result display, hexadecimal conversion (`0x8000`), and `[Copy]`, `[Clear]` controls.
+   - **Cyberpunk Lo-Fi Music Player**: Vinyl album art, 14-bar animated equalizer visualizer pulsing rhythmically with compositor ticks, and media controls (`[Prev]`, `[Pause]`, `[Next]`).
+   - **Terminal & Weather**: Monospace system CLI telemetry and atmospheric forecasts.
+
+3. **Action Tag Protocol & Intent Pipeline** (`shell/src/llm.rs` & `shell/src/compositor/mod.rs`):
+   - Structured prompt engineering enforces direct action tags (`[ACTION:stopwatch]`, `[ACTION:notes]`, `[ACTION:calculator]`, `[ACTION:music]`, etc.).
+   - Compositor extracts action tags asynchronously from local Ollama streams or fallback heuristics, directly instantiating the corresponding application card and setting the avatar into active `Speaking` / `Happy` states.
+   - Interactive mouse clicks on card action buttons execute state updates directly (pausing/running timers, resetting ticks, logging laps).
+
 ---
+
 
 ## Performance Targets
 

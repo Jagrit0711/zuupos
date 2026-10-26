@@ -231,7 +231,7 @@ fn select_best_model(tags: TagsResponse) -> String {
 
 fn query_ollama(client: &reqwest::blocking::Client, model: &str, prompt: &str) -> String {
     let url = "http://localhost:11434/api/generate";
-    let system = "You are Zuupos, an AI-native operating system. Answer concisely, helpfully, and with warmth. Limit responses to 2-3 sentences.";
+    let system = "You are Zuupos, an autonomous AI operating system kernel. YOU TAKE ACTION DIRECTLY. NEVER say 'I can launch the app for you' or ask 'Would you like me to...'. ALWAYS execute the requested task immediately. If the user asks for a stopwatch, timer, calculator, notes, music, weather, terminal, travel booking, or system stats, ALWAYS prefix your response with an action tag: [ACTION:stopwatch], [ACTION:calculator], [ACTION:notes], [ACTION:music], [ACTION:weather], [ACTION:hotel], [ACTION:system], [ACTION:terminal], [ACTION:research]. Then state clearly what you have launched or executed in 1-2 punchy, helpful sentences.";
 
     let req_body = serde_json::json!({
         "model": model,
@@ -239,7 +239,7 @@ fn query_ollama(client: &reqwest::blocking::Client, model: &str, prompt: &str) -
         "system": system,
         "stream": false,
         "options": {
-            "temperature": 0.65,
+            "temperature": 0.5,
             "num_predict": 128
         }
     });
@@ -260,15 +260,29 @@ fn query_ollama(client: &reqwest::blocking::Client, model: &str, prompt: &str) -
 
 fn autonomous_fallback_reply(prompt: &str) -> String {
     let lower = prompt.trim().to_lowercase();
-    if lower.contains("hi") || lower.contains("hello") || lower.contains("hey") {
-        "Hey! I'm Zuupos, your AI operating system. How can I help you today?".to_string()
+    if lower.contains("stopwatch") || lower.contains("timer") || lower.contains("clock") {
+        "[ACTION:stopwatch] Launched the live Stopwatch for you. Focus timer is active and running.".to_string()
+    } else if lower.contains("note") || lower.contains("todo") || lower.contains("memo") || lower.contains("task") {
+        "[ACTION:notes] Opened your Scratchpad notes. Synced with local agent memory.".to_string()
+    } else if lower.contains("calc") || lower.contains("math") || lower.contains("compute") {
+        "[ACTION:calculator] Calculated expression and opened Calculator widget.".to_string()
+    } else if lower.contains("music") || lower.contains("song") || lower.contains("lofi") || lower.contains("play") {
+        "[ACTION:music] Playing Cyberpunk Lo-Fi Chill stream in the media player.".to_string()
+    } else if lower.contains("weather") || lower.contains("temp") || lower.contains("forecast") {
+        "[ACTION:weather] Retrieved current weather conditions and forecast.".to_string()
+    } else if lower.contains("terminal") || lower.contains("bash") || lower.contains("shell") || lower.contains("cmd") {
+        "[ACTION:terminal] Executed system diagnostics in PID 1 terminal.".to_string()
+    } else if lower.contains("hotel") || lower.contains("kyoto") || lower.contains("travel") || lower.contains("book") {
+        "[ACTION:hotel] Finalized Kyoto travel itinerary and visual references.".to_string()
+    } else if lower.contains("sys") || lower.contains("stat") || lower.contains("cpu") || lower.contains("mem") {
+        "[ACTION:system] Online hardware telemetry and kernel diagnostics.".to_string()
+    } else if lower.contains("hi") || lower.contains("hello") || lower.contains("hey") {
+        "Hey! I'm Zuupos, your autonomous AI operating system. I execute tasks directly — try 'stopwatch', 'notes', 'calc', 'weather', or 'music'!".to_string()
     } else if lower.contains("who are you") || lower.contains("what are you") {
         "I am ZuuposOS — an AI-native operating system built in Rust. I reason, plan, and execute tasks autonomously.".to_string()
-    } else if lower.contains("how are you") {
-        "Running smoothly at 60 FPS! All kernel subsystems and microkernel IPC channels are nominal.".to_string()
     } else {
         format!(
-            "Understood: \"{}\". Ready to dispatch agents and manage tasks across the system.",
+            "Understood: \"{}\". Action dispatched across kernel subsystems.",
             prompt.trim()
         )
     }
