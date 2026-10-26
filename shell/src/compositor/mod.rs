@@ -8,6 +8,7 @@ use crate::avatar::Avatar;
 use crate::cards::{Card, CardHitZone, CardManager, CardType};
 use crate::ipc::{IpcReceiver, ShellEvent};
 use crate::renderer::Renderer;
+use crate::theme::ThemeMode;
 use log::info;
 use std::sync::{Arc, Mutex};
 use winit::{
@@ -41,15 +42,44 @@ struct ShellApp {
 impl ShellApp {
     fn new() -> Self {
         let mut card_manager = CardManager::new();
-        card_manager.add_card(Card {
-            title: "ZuuposOS".to_string(),
-            body: "Agent runtime initializing…".to_string(),
-            card_type: CardType::Info,
-            max_age: 300,
-            ..Default::default()
-        });
 
-        let avatar = Avatar::new();
+        let mut booking_card = Card::new_booking(
+            "Aman Kyoto",
+            "1 Ogocho, Kita Ward",
+            "BOOKING FINALIZED",
+            vec![
+                crate::cards::CardDetailRow::new("calendar", "Nov 12 - Nov 16", "4 Nights"),
+                crate::cards::CardDetailRow::new("bed", "Susuki Pavilion", "2 Guests"),
+            ],
+        );
+        booking_card.pos_x = Some(150);
+        booking_card.pos_y = Some(180);
+        booking_card.custom_width = Some(340);
+        booking_card.custom_height = Some(265);
+
+        let mut gallery_card = Card::new_gallery(
+            "Visual References Collected",
+            vec![
+                "assets/cards/kyoto_street.jpg".to_string(),
+                "assets/cards/mount_fuji.jpg".to_string(),
+                "assets/cards/japan_night.jpg".to_string(),
+                "assets/cards/modern_pavilion.jpg".to_string(),
+                "assets/cards/luxury_bedroom.jpg".to_string(),
+            ],
+        );
+        gallery_card.pos_x = Some(710);
+        gallery_card.pos_y = Some(140);
+        gallery_card.custom_width = Some(440);
+        gallery_card.custom_height = Some(440);
+
+        card_manager.add_card(booking_card);
+        card_manager.add_card(gallery_card);
+
+        let mut avatar = Avatar::new();
+        avatar.set_position(590.0, 410.0);
+        avatar.set_speech(Some(
+            "I've finalized your booking\nand gathered the visual\nreferences you wanted.\nWhere to next?",
+        ));
         let ipc_rx = Arc::new(Mutex::new(IpcReceiver::new()));
         let ipc_clone = ipc_rx.clone();
         std::thread::spawn(move || {
@@ -176,6 +206,15 @@ impl ApplicationHandler for ShellApp {
                 Key::Character(ref c) if c == "x" || c == "X" => {
                     if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
                         self.card_manager.dismiss_card(fid);
+                    }
+                }
+                Key::Character(ref c) if c == "t" || c == "T" => {
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.theme_mode = match renderer.theme_mode {
+                            ThemeMode::Light => ThemeMode::Dark,
+                            ThemeMode::Dark => ThemeMode::Light,
+                        };
+                        info!("[compositor] Theme toggled to {:?}", renderer.theme_mode);
                     }
                 }
                 Key::Named(NamedKey::Backspace) => {
