@@ -34,6 +34,7 @@ pub struct Avatar {
     rng: SmallRng,
     placed: bool,
     speech_text: Option<String>,
+    anchor: Option<(f32, f32)>,
 }
 
 impl Default for Avatar {
@@ -48,16 +49,17 @@ impl Avatar {
             emotion: Emotion::Idle,
             tick: 0,
             blink_tick: 0,
-            next_blink: 180,
+            next_blink: 120,
             emotion_since: 0,
             pos_x: 0.0,
             pos_y: 0.0,
             target_x: 0.0,
             target_y: 0.0,
-            next_wander: 200,
+            next_wander: 50,
             rng: SmallRng::seed_from_u64(0xA11A7E),
             placed: false,
             speech_text: None,
+            anchor: None,
         }
     }
 
@@ -77,6 +79,16 @@ impl Avatar {
         self.placed = true;
     }
 
+    pub fn set_target_position(&mut self, x: f32, y: f32) {
+        self.anchor = Some((x, y));
+        self.target_x = x;
+        self.target_y = y;
+    }
+
+    pub fn clear_anchor(&mut self) {
+        self.anchor = None;
+    }
+
     pub fn set_emotion(&mut self, emotion: Emotion) {
         if self.emotion != emotion {
             self.emotion = emotion;
@@ -84,51 +96,67 @@ impl Avatar {
         }
     }
 
-    /// Advances blink/pulse state and, given the current viewport size,
-    /// drifts the character toward a wander target. It only wanders while
-    /// Idle/Happy — Thinking/Speaking/Alert/Processing hold still, which
-    /// reads as the character actually concentrating rather than fidgeting.
+    /// Advances blink/pulse state and physics. The character smoothly drifts
+    /// between observation waypoints with continuous organic floating wave physics.
     pub fn tick(&mut self, global_tick: u64, width: u32, height: u32) {
         self.tick = global_tick;
 
         // Blink logic (suppress blinking while thinking)
         if self.emotion != Emotion::Thinking && global_tick >= self.next_blink {
             self.blink_tick = global_tick;
-            // Next blink: 80–280 frames (~1.3–4.6s @ 60fps)
-            self.next_blink = global_tick + 80 + (global_tick % 200);
+            // Next blink: 80–240 frames (~1.3–4.0s @ 60fps)
+            self.next_blink = global_tick + 80 + (global_tick % 160);
         }
 
-        // Wander bounds: lower-left ~58% of the screen, clear of the top
-        // menu bar and the card column docked on the right.
-        let margin = 70.0f32;
-        let min_x = margin;
-        let max_x = (width as f32 * 0.58).max(min_x + 1.0);
-        let min_y = (height as f32 * 0.42).max(60.0);
-        let max_y = (height as f32 - 110.0).max(min_y + 1.0);
+        // Wander bounds across the desktop canvas
+        let margin_x = 140.0f32;
+        let min_x = margin_x;
+        let max_x = (width as f32 - margin_x).max(min_x + 10.0);
+        let min_y = 140.0f32;
+        let max_y = (height as f32 - 180.0).max(min_y + 10.0);
 
         if !self.placed {
-            self.pos_x = min_x + (max_x - min_x) * 0.18;
-            self.pos_y = max_y - 8.0;
+            self.pos_x = (width as f32) * 0.5;
+            self.pos_y = (height as f32) * 0.42;
             self.target_x = self.pos_x;
             self.target_y = self.pos_y;
             self.placed = true;
         }
 
-        let wandering = matches!(self.emotion, Emotion::Idle | Emotion::Happy) && self.speech_text.is_none();
-        if wandering && global_tick >= self.next_wander {
-            self.target_x = self.rng.gen_range(min_x..=max_x);
-            self.target_y = self.rng.gen_range(min_y..=max_y);
-            self.next_wander = global_tick + self.rng.gen_range(260..520);
+        // Pick dynamic roaming waypoints every 140..260 ticks (~2.3-4.3s)
+        if global_tick >= self.next_wander {
+            if let Some((ax, ay)) = self.anchor {
+                // Orbit gently around anchor focal point
+                let ox = self.rng.gen_range(-48.0..=48.0);
+                let oy = self.rng.gen_range(-32.0..=32.0);
+                self.target_x = (ax + ox).clamp(min_x, max_x);
+                self.target_y = (ay + oy).clamp(min_y, max_y);
+            } else {
+                // Free roaming across wide desktop canvas
+                self.target_x = self.rng.gen_range(min_x..=max_x);
+                self.target_y = self.rng.gen_range(min_y..=max_y);
+            }
+            self.next_wander = global_tick + self.rng.gen_range(140..260);
         }
-        if wandering {
-            self.pos_x += (self.target_x - self.pos_x) * 0.012;
-            self.pos_y += (self.target_y - self.pos_y) * 0.012;
-        }
+
+        // Smooth critical-damping glide towards target waypoint
+        let glide_speed = match self.emotion {
+            Emotion::Thinking => 0.022,
+            Emotion::Alert => 0.048,
+            _ => 0.028,
+        };
+        self.pos_x += (self.target_x - self.pos_x) * glide_speed;
+        self.pos_y += (self.target_y - self.pos_y) * glide_speed;
     }
 
     /// Current on-screen center of the character, in pixels.
+    /// Incorporates continuous harmonic micro-floating wave physics so the
+    /// orb is always subtly alive, breathing, and moving.
     pub fn position(&self) -> (f32, f32) {
-        (self.pos_x, self.pos_y)
+        let t = self.tick as f32;
+        let wave_x = (t * 0.024).sin() * 9.0 + (t * 0.052).cos() * 4.5;
+        let wave_y = (t * 0.033).cos() * 8.0 + (t * 0.068).sin() * 4.0;
+        (self.pos_x + wave_x, self.pos_y + wave_y)
     }
 
     /// Horizontal travel direction, for the renderer to flip the face so it

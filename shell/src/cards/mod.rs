@@ -231,6 +231,11 @@ impl CardManager {
         removed
     }
 
+    pub fn clear(&mut self) {
+        self.cards.clear();
+        self.focused_id = None;
+    }
+
     pub fn toggle_minimized(&mut self, id: u64) {
         if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
             card.minimized = !card.minimized;

@@ -15,9 +15,9 @@
 | Kernel (`zuupos-kernel`) | ✅ Builds for `x86_64-unknown-none` — PMM/VMM, work-stealing scheduler, syscall ABI, capability IPC channels, CPIO initramfs extraction, and ELF64 loader mapping real PID 1 |
 | Userspace (`userspace/hello`) | ✅ First freestanding userspace binary, builds + packs into `target/initramfs.cpio` via `tools/build-initramfs.sh` |
 | Agentd (`zuupos-agentd`) | ✅ Full ReAct loop verified live against Ollama — reasoning → plan → tool-call cycles. Equipped with autonomous web search, doc fetcher, system introspection, and persistent curated memory |
-| Shell (`zuupos-shell`) | ✅ Dual-Palette UI Engine: Taby Ethereal Light Mode (pastel mint/lavender ambient mesh, pure white floating cards with diffuse shadows, pearl orb avatar, frosted speech bubbles, centered capsule island dock) and Warm Charcoal Dark Mode (menu bar, system stats, amber accents) |
-| Avatar character | ✅ Dual persona: soft iridescent lilac-periwinkle gradient pearl orb with attached speech bubbles (Light Mode) and expressive anti-aliased roaming creature with antenna & eyelids (Dark Mode) — see `shell/examples/avatar_preview.rs` |
-| Voice dock | 🔄 Visual affordance: centered floating capsule dock (`12:15 AM | ᯤ 📹 (🎙)`) in Light Mode; right-docked voice button with breathing ring in Dark Mode |
+| Shell (`zuupos-shell`) | ✅ Interactive Compositor: Live prompt omnibox with real-time keyboard typing, blinking caret, vector submit pill, and Dynamic Intent Execution Engine (travel, telemetry, research, themes, clear). Clean initial boot canvas |
+| Avatar character | ✅ Smooth Roaming Physics: Continuous harmonic multi-wave bobbing, wide-viewport roaming, and anchor-aware orbit around active tasks. Expressive blinking eyes, catchlight highlights, rosy blush cheeks, and reactive waveform mouth |
+| Floating Omnibox Dock | ✅ Interactive 540px Capsule Dock: Live clock, interactive text input, vector Enter button, and system/voice affordances |
 | SDK (`zuupos-sdk`) | ✅ Builds clean, capability tokens + tool registry + UI primitives |
 | Multi-app / spatial cards | ✅ Freeform spatial canvas & stacked surface: Booking Cards (`✓ BOOKING FINALIZED`, dates, guests), Visual Reference Gallery Cards (2-column photo tile grids), vector window controls, and focus cycling |
 | QEMU boot | ✅ Bare-metal UEFI boot + kernel initialization in QEMU via native macOS disk builder (`hdiutil`/FAT32), higher-half paging, GDT/TSS, and PID 1 ELF load from initramfs |

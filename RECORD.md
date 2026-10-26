@@ -56,6 +56,7 @@
 | Oct 25 2026 | **Kernel: Capability IPC syscalls (`SYS_IPC_SEND`, `SYS_IPC_RECV`)** wired into syscall dispatcher (`kernel/src/syscall/mod.rs`) | ✅ | `pending` |
 | Oct 25 2026 | **Agentd: Autonomous research tools (`web_search`, `fetch_doc`, `inspect_system`, `remember_fact`, `recall_memory`)** in `agentd/src/tools/research.rs` | ✅ | `pending` |
 | Oct 25 2026 | **Agentd: Curated long-term memory across sessions** (`curated_notes` in SQLite, injected into LLM reasoning prompt) | ✅ | `pending` |
+| Oct 26 2026 | **Interactive Compositor Shell**: Live keyboard typing, dynamic intent dispatch, anchor-aware floating AI roaming physics, clean boot canvas | ✅ | `pending` |
 | Oct 27 2026 | UEFI bootloader boots in QEMU | 🔄 | native macOS disk image creation (`hdiutil` UDTO raw disk) & QEMU runner integration |
 | Oct 29 2026 | Kernel GDT/IDT/interrupts working | ✅ | - |
 | Oct 31 2026 | Physical memory manager (buddy allocator) | ✅ | - |
@@ -204,6 +205,45 @@
    - Added `taby_light_hotel_booking.png` generation to `shell/examples/avatar_preview.rs`.
    - Inspected and verified offline rendering against reference mock screenshot.
    - All unit tests across `zuupos-agentd`, `zuupos-sdk`, and `zuupos-shell` passing cleanly.
+
+---
+
+### 2026-10-26 — Interactive Compositor Shell: Live Keyboard Typing, Dynamic Intent Dispatch & Smooth AI Roaming Physics
+
+1. **Problem Resolved**:
+   - The OS was erroneously spawning the static Aman Kyoto hotel booking card on startup, leaving the user with a frozen mock rather than a responsive desktop.
+   - The shell compositor lacked interactive keyboard input (typing characters was ignored or mapped to single-key hotkeys, Enter was unhandled).
+   - The light mode avatar rendered as a static sphere without facial features, blinking, mouth expressions, or organic roaming across the screen.
+
+2. **Continuous AI Avatar Movement & Organic Physics** (`shell/src/avatar/mod.rs` & `shell/src/renderer/mod.rs`):
+   - **Harmonic Wave Bobbing**: Continuous multi-frequency sinusoidal floating (`wave_x: sin(t*0.024)*8 + cos(t*0.052)*4`, `wave_y: cos(t*0.033)*7.5 + sin(t*0.068)*3.5`).
+   - **Desktop Roaming**: Smooth waypoint traversal across `[140..width-140]` and `[140..height-180]` with critically damped glide (`0.022..0.048`).
+   - **Anchor-Aware Traversal**: Roams freely across the desktop when the canvas is empty; orbits gracefully around active work items when cards are focused.
+   - **Expressive Facial Features**: Blinking cycle (`avatar.render_state`), specular catchlight glimmers, rosy blush cheeks, reactive mouth states (waveform when speaking, floating thinking dots, alert brow tilt).
+   - **Dynamic Ground Shadow**: Anchored floor drop shadow that squashes/stretches with floating elevation.
+
+3. **Clean Boot Canvas**:
+   - `ShellApp::new` initializes with an empty card manager; the OS boots into a spacious, uncluttered desktop with the AI greeting the user.
+
+4. **Live Interactive Keyboard Input & Floating Omnibox Dock** (`shell/src/compositor/mod.rs` & `shell/src/renderer/mod.rs`):
+   - **Floating Capsule Dock**: Widened to 540px with real-time prompt input field, live blinking caret, placeholder hints, and vector Enter pill button.
+   - **Keyboard Event Handling**: Handles printable Unicode characters via `KeyEvent.text` & `Key::Character`, `Backspace` deletion, and `Escape` input reset.
+   - **Attention Feedback**: Typing triggers avatar attention (`Emotion::Thinking`).
+
+5. **Dynamic Intent Execution Engine** (`ShellApp::handle_prompt_submission`):
+   - `"book hotel in kyoto"`, `"travel"`: Dispatches Aman Kyoto booking card + high-res Kyoto visual references gallery, avatar positions to guide the user.
+   - `"system stats"`, `"cpu"`, `"mem"`: Dispatches Kernel Diagnostics & Task Scheduler telemetry cards.
+   - `"research papers"`, `"microkernel"`: Dispatches Autonomous Web Research card with interactive action buttons.
+   - `"help"`, `"commands"`: Displays available agent command directory.
+   - `"clear"`, `"clean"`: Clears all cards, releases anchor, returns avatar to free desktop exploration.
+   - `"theme"`, `"dark"`, `"light"`: Toggles color palette.
+   - Dynamic conversational responses for general user prompts.
+
+6. **Verification & Artifacts**:
+   - `clean_desktop_idle.png`: Clean canvas on boot with empty dock and roaming AI.
+   - `clean_desktop_typing.png`: Real-time keyboard typing in dock with caret, vector enter pill, and thinking avatar.
+   - `hotel_booking_spawned.png`: Dynamically spawned travel cards with zero overlap.
+   - `system_diagnostics_spawned.png`: Live kernel diagnostics and telemetry.
 
 ---
 

@@ -194,7 +194,45 @@ fn main() {
     }
     save_png(&renderer, &out_dir.join("full_ui_multicard.png"));
 
-    // ── Taby Ethereal Light Mode Hotel Booking & Visual References Preview ───
+    // ── 1. Clean Desktop Boot Preview (Clean Canvas, Roaming Avatar, Interactive Dock)
+    {
+        let mut clean_renderer = Renderer::new_headless(fw, fh);
+        clean_renderer.theme_mode = ThemeMode::Light;
+        let mut clean_avatar = Avatar::new();
+        clean_avatar.set_position(640.0, 380.0);
+        clean_avatar.set_speech(Some(
+            "Hey! I'm Zuupos, your AI operating system.\nType anything in the dock below to get started!",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..40 {
+            tick += 1;
+            clean_avatar.tick(tick, fw, fh);
+            clean_renderer.render(tick, &[], &clean_avatar, false);
+        }
+        save_png(&clean_renderer, &out_dir.join("clean_desktop_idle.png"));
+    }
+
+    // ── 2. Live Interactive Keyboard Typing State Preview ────────────────────
+    {
+        let mut typing_renderer = Renderer::new_headless(fw, fh);
+        typing_renderer.theme_mode = ThemeMode::Light;
+        typing_renderer.prompt_input = "book hotel in Kyoto".to_string();
+        let mut typing_avatar = Avatar::new();
+        typing_avatar.set_position(640.0, 380.0);
+        typing_avatar.set_emotion(Emotion::Thinking);
+        typing_avatar.set_speech(Some(
+            "Listening...\nPress Enter or click the send button\nto dispatch.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..35 {
+            tick += 1;
+            typing_avatar.tick(tick, fw, fh);
+            typing_renderer.render(tick, &[], &typing_avatar, false);
+        }
+        save_png(&typing_renderer, &out_dir.join("clean_desktop_typing.png"));
+    }
+
+    // ── 3. Taby Ethereal Light Mode Hotel Booking & Visual References Preview ───
     let mut booking_card = Card::new_booking(
         "Aman Kyoto",
         "1 Ogocho, Kita Ward",
@@ -230,7 +268,7 @@ fn main() {
     light_renderer.theme_mode = ThemeMode::Light;
 
     let mut light_avatar = Avatar::new();
-    light_avatar.set_position(590.0, 410.0);
+    light_avatar.set_position(590.0, 500.0);
     light_avatar.set_speech(Some(
         "I've finalized your booking\nand gathered the visual\nreferences you wanted.\nWhere to next?",
     ));
@@ -242,4 +280,58 @@ fn main() {
         light_renderer.render(light_tick, &light_cards, &light_avatar, false);
     }
     save_png(&light_renderer, &out_dir.join("taby_light_hotel_booking.png"));
+    save_png(&light_renderer, &out_dir.join("hotel_booking_spawned.png"));
+
+    // ── 4. System Telemetry & Diagnostics Intent Spawned ─────────────────────
+    {
+        let card_sys = Card {
+            id: 1,
+            title: "Kernel Diagnostics".to_string(),
+            body: "PMM: 1989 MiB usable. Heap: 32 MiB. VMM 4 GiB identity mapped. Ring 3 syscalls active.".to_string(),
+            card_type: CardType::Metric,
+            max_age: 600,
+            app_id: Some("kernel".to_string()),
+            kind: Some("monitor".to_string()),
+            pos_x: Some(180),
+            pos_y: Some(180),
+            custom_width: Some(360),
+            custom_height: Some(220),
+            detail_rows: vec![
+                CardDetailRow::new("cpu", "CPU Usage", "12.4%"),
+                CardDetailRow::new("mem", "Memory Allocated", "9.1 / 16.0 GB"),
+            ],
+            ..Default::default()
+        };
+
+        let card_sched = Card {
+            id: 2,
+            title: "Task Scheduler".to_string(),
+            body: "PID 1 (init/hello) running. IPC zero-copy ring buffer latency <1.2 us.".to_string(),
+            card_type: CardType::Info,
+            max_age: 600,
+            app_id: Some("sched".to_string()),
+            pos_x: Some(580),
+            pos_y: Some(180),
+            custom_width: Some(360),
+            custom_height: Some(220),
+            ..Default::default()
+        };
+
+        let sys_cards = vec![&card_sys, &card_sched];
+        let mut sys_renderer = Renderer::new_headless(fw, fh);
+        sys_renderer.theme_mode = ThemeMode::Light;
+        let mut sys_avatar = Avatar::new();
+        sys_avatar.set_position(480.0, 480.0);
+        sys_avatar.set_emotion(Emotion::Speaking);
+        sys_avatar.set_speech(Some(
+            "System telemetry online.\nKernel running smooth at 60 FPS.\nAll diagnostics nominal.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            sys_avatar.tick(tick, fw, fh);
+            sys_renderer.render(tick, &sys_cards, &sys_avatar, false);
+        }
+        save_png(&sys_renderer, &out_dir.join("system_diagnostics_spawned.png"));
+    }
 }

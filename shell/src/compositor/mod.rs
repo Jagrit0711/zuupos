@@ -37,49 +37,19 @@ struct ShellApp {
     width: u32,
     height: u32,
     cursor_pos: (f64, f64),
+    prompt_input: String,
 }
 
 impl ShellApp {
     fn new() -> Self {
-        let mut card_manager = CardManager::new();
-
-        let mut booking_card = Card::new_booking(
-            "Aman Kyoto",
-            "1 Ogocho, Kita Ward",
-            "BOOKING FINALIZED",
-            vec![
-                crate::cards::CardDetailRow::new("calendar", "Nov 12 - Nov 16", "4 Nights"),
-                crate::cards::CardDetailRow::new("bed", "Susuki Pavilion", "2 Guests"),
-            ],
-        );
-        booking_card.pos_x = Some(150);
-        booking_card.pos_y = Some(180);
-        booking_card.custom_width = Some(340);
-        booking_card.custom_height = Some(265);
-
-        let mut gallery_card = Card::new_gallery(
-            "Visual References Collected",
-            vec![
-                "assets/cards/kyoto_street.jpg".to_string(),
-                "assets/cards/mount_fuji.jpg".to_string(),
-                "assets/cards/japan_night.jpg".to_string(),
-                "assets/cards/modern_pavilion.jpg".to_string(),
-                "assets/cards/luxury_bedroom.jpg".to_string(),
-            ],
-        );
-        gallery_card.pos_x = Some(710);
-        gallery_card.pos_y = Some(140);
-        gallery_card.custom_width = Some(440);
-        gallery_card.custom_height = Some(440);
-
-        card_manager.add_card(booking_card);
-        card_manager.add_card(gallery_card);
+        let card_manager = CardManager::new();
 
         let mut avatar = Avatar::new();
-        avatar.set_position(590.0, 410.0);
+        avatar.set_position(640.0, 380.0);
         avatar.set_speech(Some(
-            "I've finalized your booking\nand gathered the visual\nreferences you wanted.\nWhere to next?",
+            "Hey! I'm Zuupos, your AI operating system.\nType anything in the dock below to get started!",
         ));
+
         let ipc_rx = Arc::new(Mutex::new(IpcReceiver::new()));
         let ipc_clone = ipc_rx.clone();
         std::thread::spawn(move || {
@@ -93,10 +63,200 @@ impl ShellApp {
             avatar,
             ipc_rx,
             tick: 0,
-            boot_phase: BootPhase::Splash,
+            boot_phase: BootPhase::Running,
             width: 1280,
             height: 800,
             cursor_pos: (0.0, 0.0),
+            prompt_input: String::new(),
+        }
+    }
+
+    fn handle_prompt_submission(&mut self, prompt: String) {
+        let lower = prompt.trim().to_lowercase();
+        info!("[compositor] User prompt: '{}'", prompt);
+
+        // Notify avatar of active user goal
+        self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+
+        if lower.contains("book")
+            || lower.contains("hotel")
+            || lower.contains("kyoto")
+            || lower.contains("travel")
+        {
+            self.card_manager.clear();
+
+            let mut booking_card = Card::new_booking(
+                "Aman Kyoto",
+                "1 Ogocho, Kita Ward",
+                "BOOKING FINALIZED",
+                vec![
+                    crate::cards::CardDetailRow::new("calendar", "Nov 12 - Nov 16", "4 Nights"),
+                    crate::cards::CardDetailRow::new("bed", "Susuki Pavilion", "2 Guests"),
+                ],
+            );
+            booking_card.pos_x = Some(150);
+            booking_card.pos_y = Some(180);
+            booking_card.custom_width = Some(340);
+            booking_card.custom_height = Some(265);
+
+            let mut gallery_card = Card::new_gallery(
+                "Visual References Collected",
+                vec![
+                    "assets/cards/kyoto_street.jpg".to_string(),
+                    "assets/cards/mount_fuji.jpg".to_string(),
+                    "assets/cards/japan_night.jpg".to_string(),
+                    "assets/cards/modern_pavilion.jpg".to_string(),
+                    "assets/cards/luxury_bedroom.jpg".to_string(),
+                ],
+            );
+            gallery_card.pos_x = Some(710);
+            gallery_card.pos_y = Some(140);
+            gallery_card.custom_width = Some(440);
+            gallery_card.custom_height = Some(440);
+
+            self.card_manager.add_card(booking_card);
+            self.card_manager.add_card(gallery_card);
+
+            self.avatar.set_target_position(590.0, 500.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+            self.avatar.set_speech(Some(
+                "I've finalized your booking\nand gathered the visual\nreferences you wanted.\nWhere to next?",
+            ));
+        } else if lower.contains("sys")
+            || lower.contains("stat")
+            || lower.contains("cpu")
+            || lower.contains("mem")
+            || lower.contains("diag")
+        {
+            self.card_manager.clear();
+
+            let card_sys = Card {
+                id: 1,
+                title: "Kernel Diagnostics".to_string(),
+                body: "PMM: 1989 MiB usable. Heap: 32 MiB. VMM 4 GiB identity mapped. Ring 3 syscalls active.".to_string(),
+                card_type: CardType::Metric,
+                max_age: 600,
+                app_id: Some("kernel".to_string()),
+                kind: Some("monitor".to_string()),
+                pos_x: Some(180),
+                pos_y: Some(180),
+                custom_width: Some(360),
+                custom_height: Some(220),
+                detail_rows: vec![
+                    crate::cards::CardDetailRow::new("cpu", "CPU Usage", "12.4%"),
+                    crate::cards::CardDetailRow::new("mem", "Memory Allocated", "9.1 / 16.0 GB"),
+                ],
+                ..Default::default()
+            };
+
+            let card_sched = Card {
+                id: 2,
+                title: "Task Scheduler".to_string(),
+                body: "PID 1 (init/hello) running. IPC zero-copy ring buffer latency <1.2 us.".to_string(),
+                card_type: CardType::Info,
+                max_age: 600,
+                app_id: Some("sched".to_string()),
+                pos_x: Some(580),
+                pos_y: Some(180),
+                custom_width: Some(360),
+                custom_height: Some(220),
+                ..Default::default()
+            };
+
+            self.card_manager.add_card(card_sys);
+            self.card_manager.add_card(card_sched);
+
+            self.avatar.set_target_position(480.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+            self.avatar.set_speech(Some(
+                "System telemetry online.\nKernel running smooth at 60 FPS.\nAll diagnostics nominal.",
+            ));
+        } else if lower.contains("research")
+            || lower.contains("search")
+            || lower.contains("web")
+            || lower.contains("paper")
+        {
+            self.card_manager.clear();
+
+            let card_research = Card {
+                id: 1,
+                title: "Autonomous Web Research".to_string(),
+                body: "Analyzed microkernel IPC vs capability rights. Discovered zero-copy ring buffer reduces context switch overhead by 34%.".to_string(),
+                card_type: CardType::Info,
+                max_age: 600,
+                app_id: Some("research".to_string()),
+                pos_x: Some(360),
+                pos_y: Some(170),
+                custom_width: Some(440),
+                custom_height: Some(240),
+                actions: vec![
+                    crate::cards::CardAction::new("Inspect Notes", "inspect"),
+                    crate::cards::CardAction::new("Save to Memory", "save"),
+                ],
+                ..Default::default()
+            };
+
+            self.card_manager.add_card(card_research);
+            self.avatar.set_target_position(580.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+            self.avatar.set_speech(Some(
+                "Synthesized 4 research papers.\nWork-stealing scheduler architecture\nready for inspection.",
+            ));
+        } else if lower.contains("help") || lower.contains("command") || lower.contains("what can") {
+            self.card_manager.clear();
+            let card_help = Card {
+                id: 1,
+                title: "Zuupos AI Agent Capabilities".to_string(),
+                body: "Type any prompt in the dock below to direct your autonomous agent:".to_string(),
+                card_type: CardType::Info,
+                max_age: 600,
+                app_id: Some("help".to_string()),
+                pos_x: Some(340),
+                pos_y: Some(180),
+                custom_width: Some(480),
+                custom_height: Some(250),
+                detail_rows: vec![
+                    crate::cards::CardDetailRow::new("calendar", "Travel Booking", "'book hotel in kyoto'"),
+                    crate::cards::CardDetailRow::new("cpu", "Kernel Diagnostics", "'system stats' or 'cpu'"),
+                    crate::cards::CardDetailRow::new("pin", "Research Agent", "'research papers'"),
+                    crate::cards::CardDetailRow::new("bed", "Visual Themes", "'theme' (toggle light/dark)"),
+                ],
+                actions: vec![
+                    crate::cards::CardAction::new("Clear Canvas", "clear"),
+                ],
+                ..Default::default()
+            };
+            self.card_manager.add_card(card_help);
+            self.avatar.set_target_position(580.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+            self.avatar.set_speech(Some(
+                "Here are actions you can take!\nType in the dock or press Enter\nto dispatch autonomous agents.",
+            ));
+        } else if lower.contains("clear") || lower.contains("clean") || lower.contains("reset") {
+            self.card_manager.clear();
+            self.avatar.clear_anchor();
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Canvas cleared!\nWhat would you like to explore next?",
+            ));
+        } else if lower.contains("theme") || lower.contains("dark") || lower.contains("light") {
+            if let Some(renderer) = &mut self.renderer {
+                renderer.theme_mode = match renderer.theme_mode {
+                    ThemeMode::Light => ThemeMode::Dark,
+                    ThemeMode::Dark => ThemeMode::Light,
+                };
+            }
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(
+                "Switched color theme palette.\nHow does this feel?",
+            ));
+        } else {
+            let reply = format!(
+                "Understood: \"{}\".\nAgent reasoning loop active.\nAnalyzing next best action...",
+                prompt
+            );
+            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+            self.avatar.set_speech(Some(&reply));
         }
     }
 }
@@ -158,6 +318,23 @@ impl ApplicationHandler for ShellApp {
                 ..
             } => {
                 let (mx, my) = (self.cursor_pos.0 as u32, self.cursor_pos.1 as u32);
+
+                // Check Dock interactive Send button
+                let dock_w = 540u32;
+                let _dock_h = 48u32;
+                let dock_x = (self.width.saturating_sub(dock_w)) / 2;
+                let dock_y = self.height.saturating_sub(68);
+                if !self.prompt_input.is_empty() {
+                    let send_w = 46u32;
+                    let send_x = dock_x + dock_w - send_w - 8;
+                    let send_y = dock_y + 8;
+                    if mx >= send_x && mx <= send_x + send_w && my >= send_y && my <= send_y + 32 {
+                        let prompt = std::mem::take(&mut self.prompt_input);
+                        self.handle_prompt_submission(prompt);
+                        return;
+                    }
+                }
+
                 if let Some((card_id, zone)) = self.card_manager.hit_test(mx, my, self.width) {
                     match zone {
                         CardHitZone::Dismiss => {
@@ -184,13 +361,29 @@ impl ApplicationHandler for ShellApp {
                     KeyEvent {
                         state: ElementState::Pressed,
                         logical_key,
+                        text,
                         ..
                     },
                 ..
             } => match logical_key {
+                Key::Named(NamedKey::Enter) => {
+                    if !self.prompt_input.trim().is_empty() {
+                        let prompt = std::mem::take(&mut self.prompt_input);
+                        self.handle_prompt_submission(prompt);
+                    }
+                }
+                Key::Named(NamedKey::Backspace) => {
+                    self.prompt_input.pop();
+                }
                 Key::Named(NamedKey::Escape) => {
-                    info!("[compositor] Escape pressed, exiting shell");
-                    event_loop.exit();
+                    if !self.prompt_input.is_empty() {
+                        self.prompt_input.clear();
+                    } else if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
+                        self.card_manager.dismiss_card(fid);
+                    } else {
+                        info!("[compositor] Escape pressed, exiting shell");
+                        event_loop.exit();
+                    }
                 }
                 Key::Named(NamedKey::Tab) | Key::Named(NamedKey::ArrowDown) => {
                     self.card_manager.focus_next();
@@ -198,31 +391,24 @@ impl ApplicationHandler for ShellApp {
                 Key::Named(NamedKey::ArrowUp) => {
                     self.card_manager.focus_prev();
                 }
-                Key::Character(ref c) if c == "m" || c == "M" => {
-                    if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
-                        self.card_manager.toggle_minimized(fid);
+                _ => {
+                    // Capture printable Unicode text
+                    if let Some(ref txt) = text {
+                        for ch in txt.chars() {
+                            if !ch.is_control() {
+                                self.prompt_input.push(ch);
+                                self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+                            }
+                        }
+                    } else if let Key::Character(ref s) = logical_key {
+                        for ch in s.chars() {
+                            if !ch.is_control() {
+                                self.prompt_input.push(ch);
+                                self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+                            }
+                        }
                     }
                 }
-                Key::Character(ref c) if c == "x" || c == "X" => {
-                    if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
-                        self.card_manager.dismiss_card(fid);
-                    }
-                }
-                Key::Character(ref c) if c == "t" || c == "T" => {
-                    if let Some(renderer) = &mut self.renderer {
-                        renderer.theme_mode = match renderer.theme_mode {
-                            ThemeMode::Light => ThemeMode::Dark,
-                            ThemeMode::Dark => ThemeMode::Light,
-                        };
-                        info!("[compositor] Theme toggled to {:?}", renderer.theme_mode);
-                    }
-                }
-                Key::Named(NamedKey::Backspace) => {
-                    if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
-                        self.card_manager.dismiss_card(fid);
-                    }
-                }
-                _ => {}
             },
             WindowEvent::Resized(new_size) => {
                 if let Some(renderer) = &mut self.renderer {
@@ -300,6 +486,7 @@ impl ApplicationHandler for ShellApp {
 
                 let in_boot = self.boot_phase == BootPhase::Splash;
                 if let Some(renderer) = &mut self.renderer {
+                    renderer.prompt_input = self.prompt_input.clone();
                     renderer.render(
                         self.tick,
                         &self.card_manager.active_cards(),

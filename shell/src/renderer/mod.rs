@@ -65,6 +65,8 @@ pub struct Renderer {
     pub theme_mode: ThemeMode,
     /// Cached decoded image tiles for cards
     image_cache: HashMap<String, image::RgbaImage>,
+    /// Live prompt input buffer typed by the user
+    pub prompt_input: String,
 }
 
 impl Renderer {
@@ -144,6 +146,7 @@ impl Renderer {
             waveform,
             theme_mode: ThemeMode::Light,
             image_cache: HashMap::new(),
+            prompt_input: String::new(),
         }
     }
 
@@ -990,19 +993,23 @@ impl Renderer {
 
     fn draw_avatar_light(&mut self, avatar: &Avatar, tick: u64) {
         let (base_cx, base_cy) = avatar.position();
-        let breathe = (tick as f32 * 0.04).sin() * 2.2;
+        let breathe = (tick as f32 * 0.04).sin() * 2.4;
         let cx = if base_cx > 10.0 { base_cx } else { self.width as f32 * 0.52 };
         let cy = if base_cy > 10.0 { base_cy + breathe } else { self.height as f32 * 0.48 + breathe };
 
         let r = 52.0f32;
+        let (is_blinking, pulse, emotion) = avatar.render_state(tick);
 
-        // 1. Soft ethereal outer glow
-        self.fill_circle_aa(cx, cy, r + 28.0, 0xd0d8fa, 0.16);
-        self.fill_circle_aa(cx, cy, r + 16.0, 0xdcd0fa, 0.26);
-        self.fill_circle_aa(cx, cy, r + 8.0,  0xe4d6fc, 0.38);
+        // 1. Anchored ground shadow — squashes/stretches as orb floats up and down
+        let shadow_y = base_cy + r + 18.0;
+        let shadow_rx = (r * 0.78 - breathe * 0.9).max(10.0);
+        let shadow_ry = 6.5f32;
+        self.fill_ellipse_aa(cx, shadow_y, shadow_rx, shadow_ry, 0x8290ad, 0.24);
 
-        // 2. Diffuse drop shadow under orb
-        self.fill_ellipse_aa(cx + 6.0, cy + r - 2.0, r * 0.85, 14.0, 0xa6b2d4, 0.22);
+        // 2. Soft ethereal outer glow
+        self.fill_circle_aa(cx, cy, r + 28.0, 0xd0d8fa, 0.14 + pulse * 0.06);
+        self.fill_circle_aa(cx, cy, r + 16.0, 0xdcd0fa, 0.22 + pulse * 0.08);
+        self.fill_circle_aa(cx, cy, r + 8.0,  0xe4d6fc, 0.36 + pulse * 0.10);
 
         // 3. Smooth iridescent pearl sphere using radial shading
         let x0 = (cx - r - 1.0).max(0.0) as u32;
@@ -1046,11 +1053,79 @@ impl Renderer {
             }
         }
 
-        // 4. Speech bubble
+        // 4. Expressive Facial Features
+        let eye_y = cy - 7.0;
+        let left_x = cx - 14.5;
+        let right_x = cx + 14.5;
+        let eye_ry = if is_blinking { 1.2 } else { 7.0 };
+        let eye_rx = 4.8f32;
+        let eye_color = 0x1e2438;
+
+        for ex in [left_x, right_x] {
+            self.fill_ellipse_aa(ex, eye_y, eye_rx, eye_ry, eye_color, 0.96);
+            if !is_blinking {
+                // Bright catchlight
+                self.fill_circle_aa(ex - 1.6, eye_y - 2.2, 1.5, 0xffffff, 0.95);
+                // Secondary glimmer
+                self.fill_circle_aa(ex + 1.2, eye_y + 1.8, 0.9, 0xffffff, 0.65);
+            }
+        }
+
+        // Rosy blush cheeks
+        if matches!(emotion, crate::avatar::Emotion::Happy | crate::avatar::Emotion::Idle) {
+            let blush = 0xfca5a5;
+            self.fill_ellipse_aa(left_x - 6.0, eye_y + 9.5, 4.2, 2.4, blush, 0.40);
+            self.fill_ellipse_aa(right_x + 6.0, eye_y + 9.5, 4.2, 2.4, blush, 0.40);
+        }
+
+        // Expressive mouth & reaction elements
+        let mouth_y = cy + 13.0;
+        match emotion {
+            crate::avatar::Emotion::Speaking => {
+                let base_y = mouth_y;
+                let samples = self.waveform.len();
+                let wave_w = 26.0f32;
+                for i in 0..samples {
+                    let t = i as f32 / samples.max(1) as f32;
+                    let px = cx - wave_w / 2.0 + t * wave_w;
+                    let py = base_y - self.waveform[i] * 5.5;
+                    let col = lerp_color(0x5164f5, 0x06b6d4, t);
+                    self.fill_circle_aa(px, py, 1.6, col, 1.0);
+                }
+            }
+            crate::avatar::Emotion::Thinking | crate::avatar::Emotion::Processing => {
+                self.draw_arc_mouth(cx, mouth_y, 6.0, 1.0, 1.5, eye_color);
+                for i in 0..3 {
+                    let phase = (tick as f32 * 0.18 + i as f32 * 1.1).sin();
+                    let dot_y = cy - r - 8.0 - phase * 3.5;
+                    let dot_x = cx + (i as f32 - 1.0) * 8.5;
+                    self.fill_circle_aa(dot_x, dot_y, 2.2, 0x5164f5, 0.85);
+                }
+            }
+            crate::avatar::Emotion::Alert => {
+                self.draw_arc_mouth(cx, mouth_y, 8.0, -3.0, 1.6, eye_color);
+            }
+            crate::avatar::Emotion::Happy => {
+                self.draw_arc_mouth(cx, mouth_y, 11.0, 6.0, 1.8, eye_color);
+            }
+            crate::avatar::Emotion::Idle => {
+                self.draw_arc_mouth(cx, mouth_y, 8.0, 2.5, 1.5, eye_color);
+            }
+        }
+
+        // 5. Speech bubble
         if let Some(speech) = avatar.speech() {
-            let bx = cx + r * 0.65;
-            let by = cy - 42.0;
-            self.draw_speech_bubble(bx, by, speech);
+            let bw = 245u32;
+            let (bx, tip_on_left) = if cx >= 580.0 {
+                // When in the right half of canvas, bubble flips left to prevent gallery overlap
+                (cx - r * 0.70 - bw as f32, false)
+            } else if cx + r * 0.70 + bw as f32 + 20.0 <= self.width as f32 {
+                (cx + r * 0.70, true)
+            } else {
+                (cx - r * 0.70 - bw as f32, false)
+            };
+            let by = (cy - 44.0).clamp(50.0, (self.height.saturating_sub(180)) as f32);
+            self.draw_speech_bubble(bx, by, speech, tip_on_left);
         }
     }
 
@@ -1443,29 +1518,64 @@ impl Renderer {
         self.fill_rect(cx - 3, cy + 8, 7, 1, col);
     }
 
-    fn draw_speech_bubble(&mut self, x: f32, y: f32, text: &str) {
-        let bw = 245u32;
+    fn draw_enter_icon(&mut self, cx: u32, cy: u32, col: u32) {
+        // Return / Enter symbol: vertical stem down, corner left, left arrow head
+        self.fill_rect(cx + 4, cy - 5, 2, 8, col);
+        self.fill_rect(cx - 5, cy + 1, 10, 2, col);
+        for d in 0..4 {
+            let px = cx - 5 + d;
+            let py1 = cy + 1 - d;
+            let py2 = cy + 1 + d;
+            if px < self.width && py1 < self.height {
+                self.buf[(py1 * self.width + px) as usize] = col;
+            }
+            if px < self.width && py2 < self.height {
+                self.buf[(py2 * self.width + px) as usize] = col;
+            }
+        }
+    }
+
+    fn draw_speech_bubble(&mut self, x: f32, y: f32, text: &str, tip_on_left: bool) {
+        let bw = 250u32;
         let bh = 94u32;
         let bx = x as u32;
         let by = y as u32;
         let radius = 18.0f32;
 
         self.draw_card_shadow(bx, by, bw, bh, radius, 14, 0.08);
-        self.fill_rounded_rect(bx, by, bw, bh, radius, 0xffffff, 0.88, Some(0xe6ebf2));
+        self.fill_rounded_rect(bx, by, bw, bh, radius, 0xffffff, 0.98, Some(0xe6ebf2));
 
-        // Pointer notch pointing left toward the orb
-        let tip_x = bx.saturating_sub(10);
-        let tip_y = by + 44;
-        for i in 0..10 {
-            let col_x = tip_x + i;
-            let half_h = (i as f32 * 0.95) as i32;
-            for dy in -half_h..=half_h {
-                let py = (tip_y as i32 + dy) as u32;
-                if col_x < self.width && py < self.height {
-                    let idx = (py * self.width + col_x) as usize;
-                    let is_notch_border = dy == -half_h || dy == half_h || i == 0;
-                    let col = if is_notch_border { 0xe6ebf2 } else { 0xffffff };
-                    self.buf[idx] = blend_pixel(self.buf[idx], col, 0.92);
+        // Pointer notch pointing toward the orb
+        if tip_on_left {
+            let tip_x = bx.saturating_sub(10);
+            let tip_y = by + 44;
+            for i in 0..10 {
+                let col_x = tip_x + i;
+                let half_h = (i as f32 * 0.95) as i32;
+                for dy in -half_h..=half_h {
+                    let py = (tip_y as i32 + dy) as u32;
+                    if col_x < self.width && py < self.height {
+                        let idx = (py * self.width + col_x) as usize;
+                        let is_notch_border = dy == -half_h || dy == half_h || i == 0;
+                        let col = if is_notch_border { 0xe6ebf2 } else { 0xffffff };
+                        self.buf[idx] = blend_pixel(self.buf[idx], col, 0.98);
+                    }
+                }
+            }
+        } else {
+            let tip_x = bx + bw;
+            let tip_y = by + 44;
+            for i in 0..10 {
+                let col_x = tip_x + i;
+                let half_h = ((10 - i) as f32 * 0.95) as i32;
+                for dy in -half_h..=half_h {
+                    let py = (tip_y as i32 + dy) as u32;
+                    if col_x < self.width && py < self.height {
+                        let idx = (py * self.width + col_x) as usize;
+                        let is_notch_border = dy == -half_h || dy == half_h || i == 9;
+                        let col = if is_notch_border { 0xe6ebf2 } else { 0xffffff };
+                        self.buf[idx] = blend_pixel(self.buf[idx], col, 0.98);
+                    }
                 }
             }
         }
@@ -1474,17 +1584,17 @@ impl Renderer {
         let mut cur_y = by + 18;
         for (i, line) in lines.iter().enumerate() {
             let is_last = i == lines.len() - 1 && lines.len() > 1;
-            let wrapped = wrap_text(line, 30);
+            let wrapped = wrap_text(line, 32);
             for wline in wrapped {
                 let col = if is_last { 0x181a1f } else { 0x505765 };
                 self.draw_text(&wline, (bx + 16) as i32, cur_y as i32, if is_last { 10.5 } else { 10.0 }, col, is_last);
-                cur_y += 18;
+                cur_y += 16;
             }
         }
     }
 
-    fn draw_pill_dock(&mut self, _tick: u64, _avatar: &Avatar) {
-        let dock_w = 248u32;
+    fn draw_pill_dock(&mut self, tick: u64, _avatar: &Avatar) {
+        let dock_w = 540u32;
         let dock_h = 48u32;
         let dock_x = (self.width.saturating_sub(dock_w)) / 2;
         let dock_y = self.height.saturating_sub(68);
@@ -1493,16 +1603,59 @@ impl Renderer {
         self.draw_card_shadow(dock_x, dock_y, dock_w, dock_h, radius, 16, 0.07);
         self.fill_rounded_rect(dock_x, dock_y, dock_w, dock_h, radius, 0xffffff, 0.96, Some(0xe4e8f0));
 
-        self.draw_text("12:15 AM", (dock_x + 22) as i32, (dock_y + 17) as i32, 11.5, 0x1a1d24, true);
-        self.fill_rect(dock_x + 88, dock_y + 15, 1, 18, 0xe4e8f0);
+        // Clock badge on the left
+        let now = chrono::Local::now();
+        let time_str = now.format("%I:%M %p").to_string();
+        self.draw_text(&time_str, (dock_x + 18) as i32, (dock_y + 17) as i32, 11.0, 0x1a1d24, true);
+        self.fill_rect(dock_x + 86, dock_y + 15, 1, 18, 0xe4e8f0);
 
-        self.draw_wifi_icon(dock_x + 112, dock_y + 24, 0x647082);
-        self.draw_cam_icon(dock_x + 142, dock_y + 24, 0x647082);
+        // Interactive Prompt Input Field
+        let input_x = dock_x + 98;
+        if self.prompt_input.is_empty() {
+            self.draw_text(
+                "Ask Zuupos anything… (e.g. 'book hotel in Kyoto', 'stats')",
+                input_x as i32,
+                (dock_y + 17) as i32,
+                10.5,
+                0x94a3b8,
+                false,
+            );
+            // Soft blinking cursor
+            if (tick / 24) % 2 == 0 {
+                self.fill_rect(input_x + 130, dock_y + 15, 2, 17, 0x5164f5);
+            }
+        } else {
+            let display = truncate_str(&self.prompt_input, 36);
+            self.draw_text(
+                &display,
+                input_x as i32,
+                (dock_y + 17) as i32,
+                11.0,
+                0x111827,
+                true,
+            );
+            let tw = (display.chars().count() as u32 * 7) + 2;
+            if (tick / 18) % 2 == 0 {
+                self.fill_rect(input_x + tw, dock_y + 15, 2, 17, 0x5164f5);
+            }
+        }
 
-        let mic_cx = dock_x + dock_w - 26;
-        let mic_cy = dock_y + 24;
-        self.fill_circle(mic_cx, mic_cy, 16, 0xebf1ff);
-        self.draw_mic_icon(mic_cx, mic_cy, 0x5164f5);
+        // Right Affordance: Send button if typing, else System / Voice Icons
+        if !self.prompt_input.is_empty() {
+            let send_w = 46u32;
+            let send_x = dock_x + dock_w - send_w - 8;
+            let send_y = dock_y + 8;
+            self.fill_rounded_rect(send_x, send_y, send_w, 32, 16.0, 0x5164f5, 1.0, None);
+            self.draw_enter_icon(send_x + send_w / 2, send_y + 16, 0xffffff);
+        } else {
+            self.draw_wifi_icon(dock_x + dock_w - 78, dock_y + 24, 0x647082);
+            self.draw_cam_icon(dock_x + dock_w - 52, dock_y + 24, 0x647082);
+
+            let mic_cx = dock_x + dock_w - 24;
+            let mic_cy = dock_y + 24;
+            self.fill_circle(mic_cx, mic_cy, 15, 0xebf1ff);
+            self.draw_mic_icon(mic_cx, mic_cy, 0x5164f5);
+        }
     }
 
     // ── Drawing Primitives ────────────────────────────────────────────────────
