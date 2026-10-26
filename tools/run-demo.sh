@@ -24,15 +24,37 @@ fi
 # Clean up any stale sockets
 rm -f /tmp/zuupos_shell.sock
 
-# Check Ollama
-if curl -s http://localhost:11434/api/tags &>/dev/null; then
-    echo -e "${COLOR_GREEN}[✓] Local LLM engine online (Ollama detected)${COLOR_RESET}"
-else
-    echo -e "${COLOR_YELLOW}[!] Ollama not detected on localhost:11434 — running in autonomous neural reasoning mode${COLOR_RESET}"
+# Check and Auto-Initiate Local LLM (Ollama)
+OLLAMA_BIN=""
+if command -v ollama &>/dev/null; then
+    OLLAMA_BIN="$(command -v ollama)"
+elif [ -x "/opt/homebrew/bin/ollama" ]; then
+    OLLAMA_BIN="/opt/homebrew/bin/ollama"
+elif [ -x "/usr/local/bin/ollama" ]; then
+    OLLAMA_BIN="/usr/local/bin/ollama"
 fi
 
-echo -e "${COLOR_CYAN}[*] Starting ZuuposOS Shell compositor...${COLOR_RESET}"
-cargo run -p zuupos-shell &
+if curl -s http://localhost:11434/api/tags &>/dev/null; then
+    MODEL=$(curl -s http://localhost:11434/api/tags | grep -o '"name":"[^"]*"' | head -n1 | cut -d'"' -f4 || echo "llama3.2")
+    echo -e "${COLOR_GREEN}[✓] Local LLM engine online (Ollama running with ${MODEL})${COLOR_RESET}"
+elif [ -n "$OLLAMA_BIN" ]; then
+    echo -e "${COLOR_YELLOW}[*] Ollama binary found at ${OLLAMA_BIN}. Auto-initiating daemon...${COLOR_RESET}"
+    nohup "$OLLAMA_BIN" serve >/tmp/zuupos_ollama.log 2>&1 &
+    # Wait for Ollama to become available
+    for i in {1..20}; do
+        if curl -s http://localhost:11434/api/tags &>/dev/null; then
+            MODEL=$(curl -s http://localhost:11434/api/tags | grep -o '"name":"[^"]*"' | head -n1 | cut -d'"' -f4 || echo "llama3.2")
+            echo -e "${COLOR_GREEN}[✓] Local LLM daemon initiated successfully (${MODEL})${COLOR_RESET}"
+            break
+        fi
+        sleep 0.25
+    done
+else
+    echo -e "${COLOR_YELLOW}[!] Ollama not found on host — running in autonomous neural reasoning mode${COLOR_RESET}"
+fi
+
+echo -e "${COLOR_CYAN}[*] Starting ZuuposOS Shell compositor (60 FPS release mode)...${COLOR_RESET}"
+cargo run --release -p zuupos-shell &
 SHELL_PID=$!
 
 # Wait for socket to appear
@@ -44,7 +66,7 @@ for i in {1..30}; do
 done
 
 echo -e "${COLOR_CYAN}[*] Starting ZuuposOS Agent Runtime Daemon (PID 1)...${COLOR_RESET}"
-cargo run -p zuupos-agentd &
+cargo run --release -p zuupos-agentd &
 AGENTD_PID=$!
 
 trap "kill $SHELL_PID $AGENTD_PID 2>/dev/null || true; rm -f /tmp/zuupos_shell.sock" EXIT INT TERM

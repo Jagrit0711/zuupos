@@ -38,6 +38,10 @@ struct ShellApp {
     height: u32,
     cursor_pos: (f64, f64),
     prompt_input: String,
+    llm: crate::llm::LlmManager,
+    is_generating: bool,
+    active_send_ticks: u32,
+    last_frame: std::time::Instant,
 }
 
 impl ShellApp {
@@ -56,6 +60,8 @@ impl ShellApp {
             ipc_clone.lock().unwrap().listen();
         });
 
+        let llm = crate::llm::LlmManager::new();
+
         Self {
             window: None,
             renderer: None,
@@ -68,14 +74,23 @@ impl ShellApp {
             height: 800,
             cursor_pos: (0.0, 0.0),
             prompt_input: String::new(),
+            llm,
+            is_generating: false,
+            active_send_ticks: 0,
+            last_frame: std::time::Instant::now(),
         }
     }
 
     fn handle_prompt_submission(&mut self, prompt: String) {
-        let lower = prompt.trim().to_lowercase();
-        info!("[compositor] User prompt: '{}'", prompt);
+        let trimmed = prompt.trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+        let lower = trimmed.to_lowercase();
+        info!("[compositor] User prompt: '{}'", trimmed);
 
-        // Notify avatar of active user goal
+        // Tactile press state for send button
+        self.active_send_ticks = 8;
         self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
 
         if lower.contains("book")
@@ -251,12 +266,11 @@ impl ShellApp {
                 "Switched color theme palette.\nHow does this feel?",
             ));
         } else {
-            let reply = format!(
-                "Understood: \"{}\".\nAgent reasoning loop active.\nAnalyzing next best action...",
-                prompt
-            );
-            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
-            self.avatar.set_speech(Some(&reply));
+            // Live asynchronous Ollama LLM execution!
+            self.avatar.set_speech(Some("Thinking… generating response with local AI."));
+            self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+            self.is_generating = true;
+            self.llm.submit(&trimmed);
         }
     }
 }
@@ -299,7 +313,7 @@ impl ApplicationHandler for ShellApp {
         window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let Some(window) = &self.window else { return };
+        let Some(window) = self.window.clone() else { return };
         if window_id != window.id() {
             return;
         }
@@ -320,17 +334,18 @@ impl ApplicationHandler for ShellApp {
                 let (mx, my) = (self.cursor_pos.0 as u32, self.cursor_pos.1 as u32);
 
                 // Check Dock interactive Send button
-                let dock_w = 540u32;
-                let _dock_h = 48u32;
+                let dock_w = 640u32;
+                let _dock_h = 50u32;
                 let dock_x = (self.width.saturating_sub(dock_w)) / 2;
-                let dock_y = self.height.saturating_sub(68);
+                let dock_y = self.height.saturating_sub(70);
                 if !self.prompt_input.is_empty() {
                     let send_w = 46u32;
                     let send_x = dock_x + dock_w - send_w - 8;
-                    let send_y = dock_y + 8;
+                    let send_y = dock_y + 9;
                     if mx >= send_x && mx <= send_x + send_w && my >= send_y && my <= send_y + 32 {
                         let prompt = std::mem::take(&mut self.prompt_input);
                         self.handle_prompt_submission(prompt);
+                        window.request_redraw();
                         return;
                     }
                 }
@@ -354,6 +369,7 @@ impl ApplicationHandler for ShellApp {
                             self.card_manager.focus_card(card_id);
                         }
                     }
+                    window.request_redraw();
                 }
             }
             WindowEvent::KeyboardInput {
@@ -365,60 +381,99 @@ impl ApplicationHandler for ShellApp {
                         ..
                     },
                 ..
-            } => match logical_key {
-                Key::Named(NamedKey::Enter) => {
-                    if !self.prompt_input.trim().is_empty() {
-                        let prompt = std::mem::take(&mut self.prompt_input);
-                        self.handle_prompt_submission(prompt);
-                    }
-                }
-                Key::Named(NamedKey::Backspace) => {
-                    self.prompt_input.pop();
-                }
-                Key::Named(NamedKey::Escape) => {
-                    if !self.prompt_input.is_empty() {
-                        self.prompt_input.clear();
-                    } else if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
-                        self.card_manager.dismiss_card(fid);
-                    } else {
-                        info!("[compositor] Escape pressed, exiting shell");
-                        event_loop.exit();
-                    }
-                }
-                Key::Named(NamedKey::Tab) | Key::Named(NamedKey::ArrowDown) => {
-                    self.card_manager.focus_next();
-                }
-                Key::Named(NamedKey::ArrowUp) => {
-                    self.card_manager.focus_prev();
-                }
-                _ => {
-                    // Capture printable Unicode text
-                    if let Some(ref txt) = text {
-                        for ch in txt.chars() {
-                            if !ch.is_control() {
-                                self.prompt_input.push(ch);
-                                self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
-                            }
-                        }
-                    } else if let Key::Character(ref s) = logical_key {
-                        for ch in s.chars() {
-                            if !ch.is_control() {
-                                self.prompt_input.push(ch);
-                                self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
-                            }
+            } => {
+                match logical_key {
+                    Key::Named(NamedKey::Enter) => {
+                        if !self.prompt_input.trim().is_empty() {
+                            let prompt = std::mem::take(&mut self.prompt_input);
+                            self.handle_prompt_submission(prompt);
                         }
                     }
+                    Key::Named(NamedKey::Backspace) => {
+                        self.prompt_input.pop();
+                    }
+                    Key::Named(NamedKey::Escape) => {
+                        if !self.prompt_input.is_empty() {
+                            self.prompt_input.clear();
+                        } else if let Some(fid) = self.card_manager.focused_card().map(|c| c.id) {
+                            self.card_manager.dismiss_card(fid);
+                        } else {
+                            info!("[compositor] Escape pressed, exiting shell");
+                            event_loop.exit();
+                        }
+                    }
+                    Key::Named(NamedKey::Tab) | Key::Named(NamedKey::ArrowDown) => {
+                        self.card_manager.focus_next();
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        self.card_manager.focus_prev();
+                    }
+                    _ => {
+                        // Capture printable Unicode text
+                        if let Some(ref txt) = text {
+                            for ch in txt.chars() {
+                                if !ch.is_control() {
+                                    self.prompt_input.push(ch);
+                                    self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+                                }
+                            }
+                        } else if let Key::Character(ref s) = logical_key {
+                            for ch in s.chars() {
+                                if !ch.is_control() {
+                                    self.prompt_input.push(ch);
+                                    self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+                                }
+                            }
+                        }
+                    }
                 }
-            },
+                // Emil Kowalski principle: Never animate keyboard actions.
+                // Request immediate redraw for instantaneous 0ms keystroke feedback!
+                window.request_redraw();
+            }
             WindowEvent::Resized(new_size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(new_size.width.max(1), new_size.height.max(1));
                 }
                 self.width = new_size.width.max(1);
                 self.height = new_size.height.max(1);
+                window.request_redraw();
             }
             WindowEvent::RedrawRequested => {
                 self.tick += 1;
+
+                if self.active_send_ticks > 0 {
+                    self.active_send_ticks -= 1;
+                }
+
+                // Poll asynchronous LLM response
+                if let Some(response) = self.llm.poll_response() {
+                    self.is_generating = false;
+                    self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+
+                    let speech = if response.text.len() > 140 {
+                        format!("{}…", &response.text[..137])
+                    } else {
+                        response.text.clone()
+                    };
+                    self.avatar.set_speech(Some(&speech));
+
+                    // Display complete LLM answer in an AI response card
+                    let card = Card {
+                        id: 0,
+                        title: format!("AI: {}", response.model),
+                        body: response.text,
+                        card_type: CardType::Info,
+                        max_age: 1800,
+                        app_id: Some("ollama".to_string()),
+                        pos_x: Some(300),
+                        pos_y: Some(170),
+                        custom_width: Some(520),
+                        custom_height: Some(260),
+                        ..Default::default()
+                    };
+                    self.card_manager.add_card(card);
+                }
 
                 // Boot phase transition
                 if self.boot_phase == BootPhase::Splash && self.tick > 120 {
@@ -487,6 +542,9 @@ impl ApplicationHandler for ShellApp {
                 let in_boot = self.boot_phase == BootPhase::Splash;
                 if let Some(renderer) = &mut self.renderer {
                     renderer.prompt_input = self.prompt_input.clone();
+                    renderer.llm_model = self.llm.model_name().to_string();
+                    renderer.is_generating = self.is_generating;
+                    renderer.active_send_ticks = self.active_send_ticks;
                     renderer.render(
                         self.tick,
                         &self.card_manager.active_cards(),
@@ -499,16 +557,27 @@ impl ApplicationHandler for ShellApp {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Emil Kowalski & 60 FPS frame pacing: locked 16.6ms intervals
+        // Prevents CPU busy-spinning, cooling down hardware while maintaining silky smooth 60 FPS
+        let frame_duration = std::time::Duration::from_micros(16_667);
+        let elapsed = self.last_frame.elapsed();
+
+        if elapsed >= frame_duration {
+            self.last_frame = std::time::Instant::now();
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        } else {
+            let next_frame = self.last_frame + frame_duration;
+            event_loop.set_control_flow(ControlFlow::WaitUntil(next_frame));
         }
     }
 }
 
 pub fn run_shell() {
     let event_loop = EventLoop::new().expect("Failed to create event loop");
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut app = ShellApp::new();
     event_loop.run_app(&mut app).expect("Event loop error");

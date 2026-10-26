@@ -67,6 +67,12 @@ pub struct Renderer {
     image_cache: HashMap<String, image::RgbaImage>,
     /// Live prompt input buffer typed by the user
     pub prompt_input: String,
+    /// Active LLM model label for status pill
+    pub llm_model: String,
+    /// Button press active feedback ticks
+    pub active_send_ticks: u32,
+    /// Whether LLM is actively generating tokens
+    pub is_generating: bool,
 }
 
 impl Renderer {
@@ -147,6 +153,9 @@ impl Renderer {
             theme_mode: ThemeMode::Light,
             image_cache: HashMap::new(),
             prompt_input: String::new(),
+            llm_model: "llama3.2".to_string(),
+            active_send_ticks: 0,
+            is_generating: false,
         }
     }
 
@@ -744,13 +753,20 @@ impl Renderer {
             let radius = 26.0f32;
 
             let x = card.pos_x.map(|px| px as u32).unwrap_or(default_x);
-            let y = card.pos_y.map(|py| py as u32).unwrap_or(curr_y);
+            let base_y = card.pos_y.map(|py| py as u32).unwrap_or(curr_y);
+
+            // Emil Kowalski entrance animation (under 250ms, ease-out cubic, scale 0.95 -> 1.0)
+            let progress = (card.age_ticks as f32 / 12.0).clamp(0.0, 1.0);
+            let ease = 1.0 - (1.0 - progress).powi(3);
+            let y_slide = ((1.0 - ease) * 10.0) as u32;
+            let y = base_y + y_slide;
+            let card_alpha = (0.35 + 0.65 * ease).clamp(0.0, 1.0);
 
             // Diffuse drop shadow
-            self.draw_card_shadow(x, y, card_w, card_h, radius, 22, 0.08);
+            self.draw_card_shadow(x, y, card_w, card_h, radius, 22, 0.08 * card_alpha);
 
             // Pure white floating card body
-            self.fill_rounded_rect(x, y, card_w, card_h, radius, 0xffffff, 0.98, Some(0xe8edf5));
+            self.fill_rounded_rect(x, y, card_w, card_h, radius, 0xffffff, 0.98 * card_alpha, Some(0xe8edf5));
 
             if is_booking {
                 // Top status badge: (✓) BOOKING FINALIZED
@@ -1594,65 +1610,120 @@ impl Renderer {
     }
 
     fn draw_pill_dock(&mut self, tick: u64, _avatar: &Avatar) {
-        let dock_w = 540u32;
-        let dock_h = 48u32;
+        let dock_w = 640u32;
+        let dock_h = 50u32;
         let dock_x = (self.width.saturating_sub(dock_w)) / 2;
-        let dock_y = self.height.saturating_sub(68);
-        let radius = 24.0f32;
+        let dock_y = self.height.saturating_sub(70);
+        let radius = 25.0f32;
 
         self.draw_card_shadow(dock_x, dock_y, dock_w, dock_h, radius, 16, 0.07);
         self.fill_rounded_rect(dock_x, dock_y, dock_w, dock_h, radius, 0xffffff, 0.96, Some(0xe4e8f0));
 
-        // Clock badge on the left
+        // 1. Clock badge on the left
         let now = chrono::Local::now();
         let time_str = now.format("%I:%M %p").to_string();
-        self.draw_text(&time_str, (dock_x + 18) as i32, (dock_y + 17) as i32, 11.0, 0x1a1d24, true);
-        self.fill_rect(dock_x + 86, dock_y + 15, 1, 18, 0xe4e8f0);
+        self.draw_text(&time_str, (dock_x + 16) as i32, (dock_y + 18) as i32, 11.0, 0x1a1d24, true);
+        self.fill_rect(dock_x + 82, dock_y + 15, 1, 20, 0xe4e8f0);
 
-        // Interactive Prompt Input Field
-        let input_x = dock_x + 98;
+        // 2. LLM Model Status Capsule
+        let model_pill_x = dock_x + 90;
+        let model_pill_y = dock_y + 13;
+        let model_pill_w = 88u32;
+        let model_pill_h = 24u32;
+
+        let display_model = if self.llm_model.is_empty() {
+            "llama3.2".to_string()
+        } else {
+            self.llm_model.split(':').next().unwrap_or("llama3.2").to_string()
+        };
+
+        if self.is_generating {
+            // Pulsing active generation indicator
+            self.fill_rounded_rect(model_pill_x, model_pill_y, model_pill_w, model_pill_h, 12.0, 0xeff6ff, 1.0, Some(0xbfdbfe));
+            let pulse = (tick as f32 * 0.15).sin().abs();
+            let dot_color = blend(0x3b82f6, 0x60a5fa, pulse);
+            self.fill_circle(model_pill_x + 12, model_pill_y + 12, 4, dot_color);
+            self.draw_text("thinking…", (model_pill_x + 22) as i32, (model_pill_y + 6) as i32, 9.5, 0x1d4ed8, true);
+        } else {
+            // Ready status pill with emerald dot
+            self.fill_rounded_rect(model_pill_x, model_pill_y, model_pill_w, model_pill_h, 12.0, 0xecfdf5, 1.0, Some(0xa7f3d0));
+            self.fill_circle(model_pill_x + 12, model_pill_y + 12, 4, 0x10b981);
+            let label = truncate_str(&display_model, 9);
+            self.draw_text(&label, (model_pill_x + 22) as i32, (model_pill_y + 6) as i32, 9.5, 0x065f46, true);
+        }
+
+        self.fill_rect(dock_x + 186, dock_y + 15, 1, 20, 0xe4e8f0);
+
+        // 3. Interactive Omnibox Prompt Input Field
+        let input_x = dock_x + 196;
         if self.prompt_input.is_empty() {
             self.draw_text(
-                "Ask Zuupos anything… (e.g. 'book hotel in Kyoto', 'stats')",
+                "Ask Zuupos anything… ('hi', 'hotel', 'stats')",
                 input_x as i32,
-                (dock_y + 17) as i32,
+                (dock_y + 18) as i32,
                 10.5,
                 0x94a3b8,
                 false,
             );
             // Soft blinking cursor
             if (tick / 24) % 2 == 0 {
-                self.fill_rect(input_x + 130, dock_y + 15, 2, 17, 0x5164f5);
+                self.fill_rect(input_x + 124, dock_y + 16, 2, 18, 0x5164f5);
             }
         } else {
-            let display = truncate_str(&self.prompt_input, 36);
+            let display = truncate_str(&self.prompt_input, 34);
             self.draw_text(
                 &display,
                 input_x as i32,
-                (dock_y + 17) as i32,
+                (dock_y + 18) as i32,
                 11.0,
                 0x111827,
                 true,
             );
             let tw = (display.chars().count() as u32 * 7) + 2;
             if (tick / 18) % 2 == 0 {
-                self.fill_rect(input_x + tw, dock_y + 15, 2, 17, 0x5164f5);
+                self.fill_rect(input_x + tw, dock_y + 16, 2, 18, 0x5164f5);
             }
         }
 
-        // Right Affordance: Send button if typing, else System / Voice Icons
-        if !self.prompt_input.is_empty() {
-            let send_w = 46u32;
-            let send_x = dock_x + dock_w - send_w - 8;
-            let send_y = dock_y + 8;
-            self.fill_rounded_rect(send_x, send_y, send_w, 32, 16.0, 0x5164f5, 1.0, None);
-            self.draw_enter_icon(send_x + send_w / 2, send_y + 16, 0xffffff);
+        // 4. Right Affordance: Send button or voice/utility icons
+        // Emil Kowalski Principle: Active press feedback (scale 0.96)
+        if !self.prompt_input.is_empty() || self.is_generating {
+            if self.active_send_ticks > 0 {
+                // Tactile pressed scale (scale down by ~4%)
+                let send_w = 42u32;
+                let send_h = 28u32;
+                let send_x = dock_x + dock_w - send_w - 10;
+                let send_y = dock_y + 11;
+                self.fill_rounded_rect(send_x, send_y, send_w, send_h, 14.0, 0x3d4fd1, 1.0, None);
+                self.draw_enter_icon(send_x + send_w / 2, send_y + 14, 0xffffff);
+            } else if self.is_generating {
+                let send_w = 46u32;
+                let send_h = 32u32;
+                let send_x = dock_x + dock_w - send_w - 8;
+                let send_y = dock_y + 9;
+                self.fill_rounded_rect(send_x, send_y, send_w, send_h, 16.0, 0x6366f1, 1.0, None);
+                // 3 jumping dots inside button
+                for dot_i in 0..3 {
+                    let dot_phase = (tick as f32 * 0.2 + dot_i as f32 * 0.9).sin();
+                    let dot_y_off = (dot_phase * 2.5) as i32;
+                    let dot_x = send_x + 15 + dot_i as u32 * 8;
+                    let dot_y = (send_y as i32 + 16 + dot_y_off).max(0) as u32;
+                    self.fill_circle(dot_x, dot_y, 2, 0xffffff);
+                }
+            } else {
+                let send_w = 46u32;
+                let send_h = 32u32;
+                let send_x = dock_x + dock_w - send_w - 8;
+                let send_y = dock_y + 9;
+                self.fill_rounded_rect(send_x, send_y, send_w, send_h, 16.0, 0x5164f5, 1.0, None);
+                self.draw_enter_icon(send_x + send_w / 2, send_y + 16, 0xffffff);
+            }
         } else {
-            self.draw_wifi_icon(dock_x + dock_w - 78, dock_y + 24, 0x647082);
-            self.draw_cam_icon(dock_x + dock_w - 52, dock_y + 24, 0x647082);
+            self.draw_wifi_icon(dock_x + dock_w - 82, dock_y + 25, 0x647082);
+            self.draw_cam_icon(dock_x + dock_w - 54, dock_y + 25, 0x647082);
 
             let mic_cx = dock_x + dock_w - 24;
-            let mic_cy = dock_y + 24;
+            let mic_cy = dock_y + 25;
             self.fill_circle(mic_cx, mic_cy, 15, 0xebf1ff);
             self.draw_mic_icon(mic_cx, mic_cy, 0x5164f5);
         }

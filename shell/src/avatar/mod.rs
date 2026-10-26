@@ -30,6 +30,8 @@ pub struct Avatar {
     pos_y: f32,
     target_x: f32,
     target_y: f32,
+    vx: f32,
+    vy: f32,
     next_wander: u64,
     rng: SmallRng,
     placed: bool,
@@ -55,6 +57,8 @@ impl Avatar {
             pos_y: 0.0,
             target_x: 0.0,
             target_y: 0.0,
+            vx: 0.0,
+            vy: 0.0,
             next_wander: 50,
             rng: SmallRng::seed_from_u64(0xA11A7E),
             placed: false,
@@ -139,14 +143,22 @@ impl Avatar {
             self.next_wander = global_tick + self.rng.gen_range(140..260);
         }
 
-        // Smooth critical-damping glide towards target waypoint
-        let glide_speed = match self.emotion {
-            Emotion::Thinking => 0.022,
-            Emotion::Alert => 0.048,
-            _ => 0.028,
+        // Spring physics (Emil Kowalski / Apple-style spring model with velocity momentum)
+        let stiffness = match self.emotion {
+            Emotion::Thinking => 0.032,
+            Emotion::Alert => 0.060,
+            _ => 0.038,
         };
-        self.pos_x += (self.target_x - self.pos_x) * glide_speed;
-        self.pos_y += (self.target_y - self.pos_y) * glide_speed;
+        let damping = 0.82f32;
+
+        let ax = (self.target_x - self.pos_x) * stiffness;
+        let ay = (self.target_y - self.pos_y) * stiffness;
+
+        self.vx = (self.vx + ax) * damping;
+        self.vy = (self.vy + ay) * damping;
+
+        self.pos_x += self.vx;
+        self.pos_y += self.vy;
     }
 
     /// Current on-screen center of the character, in pixels.

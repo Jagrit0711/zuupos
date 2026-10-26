@@ -9,5 +9,6 @@ pub mod avatar;
 pub mod cards;
 pub mod compositor;
 pub mod ipc;
+pub mod llm;
 pub mod renderer;
 pub mod theme;
