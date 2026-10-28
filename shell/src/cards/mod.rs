@@ -319,7 +319,207 @@ impl Card {
             custom_height: Some(280),
         }
     }
+
+    pub fn new_real_system(sys: &mut sysinfo::System) -> Self {
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+        let cpu_pct = sys.global_cpu_usage();
+        let total_mem = sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0);
+        let used_mem = sys.used_memory() as f64 / (1024.0 * 1024.0 * 1024.0);
+        let mem_pct = if total_mem > 0.0 { (used_mem / total_mem) * 100.0 } else { 0.0 };
+
+        let os_name = sysinfo::System::name().unwrap_or_else(|| "Darwin/macOS".to_string());
+        let kernel_ver = sysinfo::System::kernel_version().unwrap_or_else(|| "native".to_string());
+        let proc_count = sys.processes().len();
+
+        let mut procs: Vec<_> = sys.processes().values().collect();
+        procs.sort_by(|a, b| b.memory().cmp(&a.memory()));
+        let top_proc = procs
+            .first()
+            .map(|p| format!("{} ({} MB)", p.name().to_string_lossy(), p.memory() / (1024 * 1024)))
+            .unwrap_or_else(|| "kernel_task".to_string());
+
+        Self {
+            id: 0,
+            title: "Host System Telemetry".to_string(),
+            body: format!("OS: {} | Kernel: {} | Active Processes: {}", os_name, kernel_ver, proc_count),
+            card_type: CardType::Metric,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("system".to_string()),
+            kind: Some("telemetry".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("Refresh", "refresh_sys"),
+                CardAction::new("Dismiss", "dismiss_card"),
+            ],
+            subtitle: Some(format!("Real Hardware Telemetry • {}", os_name)),
+            status_badge: Some(format!("{:.1}% CPU", cpu_pct)),
+            detail_rows: vec![
+                CardDetailRow::new("cpu", "Global CPU Load", &format!("{:.1}%", cpu_pct)),
+                CardDetailRow::new("mem", "Memory Allocated", &format!("{:.2} / {:.1} GB ({:.0}%)", used_mem, total_mem, mem_pct)),
+                CardDetailRow::new("pin", "Top Memory Process", &top_proc),
+                CardDetailRow::new("calendar", "Active Processes", &format!("{} processes running", proc_count)),
+            ],
+            gallery_images: Vec::new(),
+            pos_x: Some(380),
+            pos_y: Some(150),
+            custom_width: Some(440),
+            custom_height: Some(290),
+        }
+    }
+
+    pub fn new_file_browser(dir_path: &str) -> Self {
+        let path = std::path::Path::new(dir_path);
+        let mut entries = Vec::new();
+        let mut total_files = 0;
+        let mut total_dirs = 0;
+
+        if let Ok(read_dir) = std::fs::read_dir(path) {
+            for entry in read_dir.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue;
+                }
+                if let Ok(ft) = entry.file_type() {
+                    if ft.is_dir() {
+                        total_dirs += 1;
+                        entries.push((name, "Folder".to_string()));
+                    } else {
+                        total_files += 1;
+                        let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                        let size_str = if size_bytes < 1024 {
+                            format!("{} B", size_bytes)
+                        } else if size_bytes < 1024 * 1024 {
+                            format!("{:.1} KB", size_bytes as f64 / 1024.0)
+                        } else {
+                            format!("{:.1} MB", size_bytes as f64 / (1024.0 * 1024.0))
+                        };
+                        entries.push((name, size_str));
+                    }
+                }
+            }
+        }
+
+        entries.sort_by(|a, b| {
+            let a_is_dir = a.1 == "Folder";
+            let b_is_dir = b.1 == "Folder";
+            b_is_dir.cmp(&a_is_dir).then_with(|| a.0.cmp(&b.0))
+        });
+
+        let detail_rows = entries
+            .iter()
+            .take(4)
+            .map(|(name, size)| {
+                let icon = if size == "Folder" { "calendar" } else { "pin" };
+                CardDetailRow::new(icon, name, size)
+            })
+            .collect();
+
+        Self {
+            id: 0,
+            title: "Workspace File Explorer".to_string(),
+            body: format!("{}: {} folders, {} files discovered.", path.display(), total_dirs, total_files),
+            card_type: CardType::Info,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("files".to_string()),
+            kind: Some("files".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("Refresh", "refresh_files"),
+                CardAction::new("Dismiss", "dismiss_card"),
+            ],
+            subtitle: Some(format!("Real Filesystem • {} items", entries.len())),
+            status_badge: Some(format!("{} FILES", total_files)),
+            detail_rows,
+            gallery_images: Vec::new(),
+            pos_x: Some(380),
+            pos_y: Some(150),
+            custom_width: Some(440),
+            custom_height: Some(290),
+        }
+    }
+
+    pub fn new_dynamic_notes(title: &str, items: &[(String, bool)]) -> Self {
+        let detail_rows = items
+            .iter()
+            .take(5)
+            .map(|(text, done)| {
+                let status = if *done { "Done ✓" } else { "Active" };
+                let icon = if *done { "check" } else { "pin" };
+                CardDetailRow::new(icon, text, status)
+            })
+            .collect();
+
+        Self {
+            id: 0,
+            title: title.to_string(),
+            body: format!("{} active items in persistent memory.", items.iter().filter(|(_, d)| !*d).count()),
+            card_type: CardType::Notes,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("notes".to_string()),
+            kind: Some("notes".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("+ New Task", "add_task"),
+                CardAction::new("Clear Done", "clear_done"),
+            ],
+            subtitle: Some("Live Scratchpad".to_string()),
+            status_badge: Some(format!("{}/{} DONE", items.iter().filter(|(_, d)| *d).count(), items.len())),
+            detail_rows,
+            gallery_images: Vec::new(),
+            pos_x: Some(400),
+            pos_y: Some(160),
+            custom_width: Some(440),
+            custom_height: Some(290),
+        }
+    }
+
+    pub fn new_llm_response(prompt: &str, response: &str, model: &str) -> Self {
+        let preview_title = if prompt.len() > 32 {
+            format!("{}…", &prompt[..30])
+        } else {
+            prompt.to_string()
+        };
+
+        Self {
+            id: 0,
+            title: preview_title,
+            body: response.to_string(),
+            card_type: CardType::Info,
+            age_ticks: 0,
+            max_age: 100000,
+            app_id: Some("ai".to_string()),
+            kind: Some("synthesis".to_string()),
+            focused: true,
+            minimized: false,
+            actions: vec![
+                CardAction::new("Save Note", "save_to_notes"),
+                CardAction::new("Dismiss", "dismiss_card"),
+            ],
+            subtitle: Some(format!("AI Agent Response • {}", model)),
+            status_badge: Some("LIVE INFERENCE".to_string()),
+            detail_rows: Vec::new(),
+            gallery_images: Vec::new(),
+            pos_x: Some(360),
+            pos_y: Some(150),
+            custom_width: Some(520),
+            custom_height: Some(300),
+        }
+    }
+
+    pub fn evaluate_math(input: &str) -> Option<(String, String, String)> {
+        evaluate_math(input)
+    }
 }
+
 
 impl Default for Card {
     fn default() -> Self {
@@ -563,3 +763,144 @@ impl CardManager {
         None
     }
 }
+
+pub fn evaluate_math(input: &str) -> Option<(String, String, String)> {
+    let clean = input.trim();
+    let expr = if let Some(stripped) = clean.strip_prefix("calc") {
+        stripped
+    } else if let Some(stripped) = clean.strip_prefix("math") {
+        stripped
+    } else if let Some(stripped) = clean.strip_prefix("compute") {
+        stripped
+    } else {
+        clean
+    }
+    .trim()
+    .trim_end_matches('=');
+
+    if expr.is_empty() {
+        return None;
+    }
+
+    // Quick percentage pattern: "15% of 85" or "15% * 85"
+    if let Some(pos) = expr.find("% of ") {
+        if let (Ok(pct), Ok(total)) = (
+            expr[..pos].trim().parse::<f64>(),
+            expr[pos + 5..].trim().parse::<f64>(),
+        ) {
+            let res = (pct / 100.0) * total;
+            let formatted = format!("{}% of {}", pct, total);
+            let dec = format!("{:.2}", res)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string();
+            let hex = if res >= 0.0 && res <= (u64::MAX as f64) && res.fract().abs() < 1e-5 {
+                format!("0x{:X}", res as u64)
+            } else {
+                "N/A".to_string()
+            };
+            return Some((formatted, dec, hex));
+        }
+    }
+
+    parse_arithmetic(expr).map(|val| {
+        let decimal = if val.fract().abs() < 1e-6 {
+            format!("{}", val as i64)
+        } else {
+            format!("{:.4}", val)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
+        };
+        let hex = if val >= 0.0 && val <= (u64::MAX as f64) && val.fract().abs() < 1e-6 {
+            format!("0x{:X}", val as u64)
+        } else {
+            "N/A".to_string()
+        };
+        (expr.to_string(), decimal, hex)
+    })
+}
+
+fn parse_arithmetic(expr: &str) -> Option<f64> {
+    let mut chars = expr.chars().filter(|c| !c.is_whitespace()).peekable();
+    parse_expr(&mut chars)
+}
+
+fn parse_expr<I: Iterator<Item = char>>(chars: &mut std::iter::Peekable<I>) -> Option<f64> {
+    let mut val = parse_term(chars)?;
+    while let Some(&op) = chars.peek() {
+        if op == '+' || op == '-' {
+            chars.next();
+            let rhs = parse_term(chars)?;
+            if op == '+' {
+                val += rhs;
+            } else {
+                val -= rhs;
+            }
+        } else {
+            break;
+        }
+    }
+    Some(val)
+}
+
+fn parse_term<I: Iterator<Item = char>>(chars: &mut std::iter::Peekable<I>) -> Option<f64> {
+    let mut val = parse_factor(chars)?;
+    while let Some(&op) = chars.peek() {
+        if op == '*' || op == '/' || op == '%' {
+            chars.next();
+            let rhs = parse_factor(chars)?;
+            if op == '*' {
+                val *= rhs;
+            } else if op == '/' {
+                if rhs.abs() < 1e-12 {
+                    return None;
+                }
+                val /= rhs;
+            } else {
+                val %= rhs;
+            }
+        } else {
+            break;
+        }
+    }
+    Some(val)
+}
+
+fn parse_factor<I: Iterator<Item = char>>(chars: &mut std::iter::Peekable<I>) -> Option<f64> {
+    if let Some(&ch) = chars.peek() {
+        if ch == '+' {
+            chars.next();
+            return parse_factor(chars);
+        } else if ch == '-' {
+            chars.next();
+            return parse_factor(chars).map(|v| -v);
+        } else if ch == '(' {
+            chars.next();
+            let val = parse_expr(chars)?;
+            if chars.next() == Some(')') {
+                return Some(val);
+            } else {
+                return None;
+            }
+        }
+    }
+
+    // Number (decimal or hex 0x...)
+    let mut num_str = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_hexdigit() || ch == '.' || ch == 'x' || ch == 'X' {
+            num_str.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if num_str.starts_with("0x") || num_str.starts_with("0X") {
+        u64::from_str_radix(&num_str[2..], 16).ok().map(|v| v as f64)
+    } else {
+        num_str.parse::<f64>().ok()
+    }
+}
+

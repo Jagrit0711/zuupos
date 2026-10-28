@@ -806,6 +806,9 @@ impl Renderer {
             // Pure white floating card body
             self.fill_rounded_rect(x, y, card_w, card_h, radius, 0xffffff, 0.98 * card_alpha, Some(0xe8edf5));
 
+            // Top-right close button [×]
+            self.draw_text("×", (x + card_w - 22) as i32, (y + 10) as i32, 13.0, 0x94a3b8, true);
+
             if is_booking {
                 // Top status badge: (✓) BOOKING FINALIZED
                 let badge = card.status_badge.as_deref().unwrap_or("BOOKING FINALIZED");
@@ -1026,11 +1029,11 @@ impl Renderer {
                 }
 
                 if !card.detail_rows.is_empty() {
-                    let start_dy = y + 54 + (body_lines.len().min(4) as u32 * 18) + 8;
-                    for (di, row) in card.detail_rows.iter().enumerate().take(2) {
+                    let start_dy = y + 54 + (body_lines.len().min(3) as u32 * 18) + 8;
+                    for (di, row) in card.detail_rows.iter().enumerate().take(5) {
                         let dy = start_dy + di as u32 * 24;
                         self.draw_text(&row.label, (x + 24) as i32, dy as i32, 10.5, 0x64748b, true);
-                        self.draw_text(&row.value, (x + card_w - 140) as i32, dy as i32, 10.5, 0x1e293b, false);
+                        self.draw_text(&row.value, (x + card_w - 180) as i32, dy as i32, 10.5, 0x1e293b, false);
                     }
                 }
 

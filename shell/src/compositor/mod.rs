@@ -42,6 +42,9 @@ struct ShellApp {
     is_generating: bool,
     active_send_ticks: u32,
     last_frame: std::time::Instant,
+    sys: sysinfo::System,
+    user_notes: Vec<(String, bool)>,
+    stopwatch_running: bool,
 }
 
 impl ShellApp {
@@ -61,6 +64,14 @@ impl ShellApp {
         });
 
         let llm = crate::llm::LlmManager::new();
+        let mut sys = sysinfo::System::new_all();
+        sys.refresh_all();
+
+        let user_notes = vec![
+            ("Zero-copy capability IPC channels".to_string(), true),
+            ("Verify host hardware telemetry sensors".to_string(), false),
+            ("Autonomous agent long-term memory".to_string(), false),
+        ];
 
         Self {
             window: None,
@@ -78,6 +89,9 @@ impl ShellApp {
             is_generating: false,
             active_send_ticks: 0,
             last_frame: std::time::Instant::now(),
+            sys,
+            user_notes,
+            stopwatch_running: false,
         }
     }
 
@@ -93,18 +107,91 @@ impl ShellApp {
         self.active_send_ticks = 8;
         self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
 
-        if lower.contains("stopwatch")
-            || lower.contains("timer")
-            || lower.contains("clock")
-            || lower.contains("watch")
+        // 1. Real Dynamic Math Evaluation
+        if let Some((expr, decimal, hex)) = Card::evaluate_math(&trimmed) {
+            self.card_manager.clear();
+            let card = Card::new_calculator(&expr, &decimal, &hex);
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(720.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            let speech = format!(
+                "Calculated:\n{} = {}\nHex: {}",
+                expr, decimal, hex
+            );
+            self.avatar.set_speech(Some(&speech));
+            return;
+        }
+
+        // 2. Real System Telemetry (Host CPU, RAM, Processes via sysinfo)
+        if lower.contains("sys")
+            || lower.contains("stat")
+            || lower.contains("cpu")
+            || lower.contains("mem")
+            || lower.contains("hardware")
+            || lower.contains("diag")
         {
             self.card_manager.clear();
-            self.card_manager.add_card(Card::new_stopwatch());
+            let card = Card::new_real_system(&mut self.sys);
+            let cpu_pct = self.sys.global_cpu_usage();
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(740.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
+            self.avatar.set_speech(Some(&format!(
+                "Host telemetry online:\nCPU load: {:.1}%\nLive processes monitored.",
+                cpu_pct
+            )));
+            return;
+        }
+
+        // 3. Real Workspace Filesystem Explorer
+        if lower.contains("file")
+            || lower.contains("ls")
+            || lower.contains("dir")
+            || lower.contains("folder")
+            || lower.contains("workspace")
+        {
+            self.card_manager.clear();
+            let card = Card::new_file_browser(".");
+            self.card_manager.add_card(card);
             self.avatar.set_target_position(740.0, 480.0);
             self.avatar.set_emotion(crate::avatar::Emotion::Happy);
             self.avatar.set_speech(Some(
-                "Stopwatch launched!\nFocus timer is active and running.",
+                "Workspace explorer online.\nListed actual local filesystem contents.",
             ));
+            return;
+        }
+
+        // 4. Real Interactive Task / Scratchpad Manager
+        if lower.starts_with("todo:")
+            || lower.starts_with("note:")
+            || lower.starts_with("task:")
+            || lower.starts_with("todo ")
+            || lower.starts_with("note ")
+            || lower.starts_with("add task ")
+            || lower.starts_with("add note ")
+        {
+            let task_text = trimmed
+                .trim_start_matches("todo:")
+                .trim_start_matches("note:")
+                .trim_start_matches("task:")
+                .trim_start_matches("todo ")
+                .trim_start_matches("note ")
+                .trim_start_matches("add task ")
+                .trim_start_matches("add note ")
+                .trim();
+            if !task_text.is_empty() {
+                self.user_notes.push((task_text.to_string(), false));
+            }
+            self.card_manager.clear();
+            let card = Card::new_dynamic_notes("System Scratchpad", &self.user_notes);
+            self.card_manager.add_card(card);
+            self.avatar.set_target_position(740.0, 480.0);
+            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
+            self.avatar.set_speech(Some(&format!(
+                "Saved task to memory:\n\"{}\"\nUpdated Scratchpad.",
+                task_text
+            )));
+            return;
         } else if lower.contains("note")
             || lower.contains("todo")
             || lower.contains("memo")
@@ -112,37 +199,35 @@ impl ShellApp {
             || lower.contains("scratch")
         {
             self.card_manager.clear();
-            let card = Card::new_notes(
-                "System Scratchpad",
-                vec![
-                    "Zero-copy ring buffer IPC latency <1.2µs",
-                    "60 FPS locked compositor frame pacing",
-                    "Bare-metal FAT32 filesystem driver",
-                ],
-            );
+            let card = Card::new_dynamic_notes("System Scratchpad", &self.user_notes);
             self.card_manager.add_card(card);
             self.avatar.set_target_position(740.0, 480.0);
             self.avatar.set_emotion(crate::avatar::Emotion::Happy);
             self.avatar.set_speech(Some(
-                "Opened Scratchpad notes.\nTasks are synced with local memory.",
+                "Opened live Scratchpad.\nClick tasks to toggle or + New Task.",
             ));
-        } else if lower.contains("calc")
-            || lower.contains("math")
-            || lower.contains("compute")
+            return;
+        }
+
+        // 5. Interactive Stopwatch
+        if lower.contains("stopwatch")
+            || lower.contains("timer")
+            || lower.contains("clock")
+            || lower.contains("watch")
         {
             self.card_manager.clear();
-            let card = Card::new_calculator(
-                "256 * 1024 / 8 = 32,768 KB",
-                "32,768 KB (32 MB)",
-                "0x8000",
-            );
-            self.card_manager.add_card(card);
-            self.avatar.set_target_position(720.0, 480.0);
+            self.card_manager.add_card(Card::new_stopwatch());
+            self.stopwatch_running = true;
+            self.avatar.set_target_position(740.0, 480.0);
             self.avatar.set_emotion(crate::avatar::Emotion::Happy);
             self.avatar.set_speech(Some(
-                "Calculator online.\nResult and conversions computed.",
+                "Stopwatch launched!\nFocus timer is active and running.",
             ));
-        } else if lower.contains("music")
+            return;
+        }
+
+        // 6. Media / Music Visualizer
+        if lower.contains("music")
             || lower.contains("song")
             || lower.contains("lofi")
             || lower.contains("audio")
@@ -156,42 +241,16 @@ impl ShellApp {
             self.avatar.set_speech(Some(
                 "Now playing Cyberpunk Lo-Fi.\nAmbient audio visualizer active.",
             ));
-        } else if lower.contains("weather")
-            || lower.contains("temp")
-            || lower.contains("forecast")
-        {
-            self.card_manager.clear();
-            let card = Card::new_weather("Kyoto, Japan", "22°C", "Partly Cloudy");
-            self.card_manager.add_card(card);
-            self.avatar.set_target_position(720.0, 480.0);
-            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
-            self.avatar.set_speech(Some(
-                "Weather forecast online.\n22°C and partly cloudy in Kyoto.",
-            ));
-        } else if lower.contains("terminal")
-            || lower.contains("bash")
-            || lower.contains("shell")
-            || lower.contains("cmd")
-            || lower.contains("sh")
-        {
-            self.card_manager.clear();
-            let card = Card::new_terminal(
-                "sysinfo --detailed",
-                "Kernel: 0.5.2-native (x86_64)\nScheduler: Work-Stealing Preemptive PIT\nHeap: 32MB | PMM Usable: 1989MB\nOllama: llama3.2 (Active - 134ms eval)",
-            );
-            self.card_manager.add_card(card);
-            self.avatar.set_target_position(740.0, 480.0);
-            self.avatar.set_emotion(crate::avatar::Emotion::Happy);
-            self.avatar.set_speech(Some(
-                "Terminal console online.\nKernel process status nominal.",
-            ));
-        } else if lower.contains("book")
+            return;
+        }
+
+        // 7. Travel Booking Concept
+        if lower.contains("book")
             || lower.contains("hotel")
             || lower.contains("kyoto")
             || lower.contains("travel")
         {
             self.card_manager.clear();
-
             let mut booking_card = Card::new_booking(
                 "Aman Kyoto",
                 "1 Ogocho, Kita Ward",
@@ -223,93 +282,16 @@ impl ShellApp {
 
             self.card_manager.add_card(booking_card);
             self.card_manager.add_card(gallery_card);
-
             self.avatar.set_target_position(590.0, 500.0);
             self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
             self.avatar.set_speech(Some(
                 "I've finalized your booking\nand gathered the visual\nreferences you wanted.\nWhere to next?",
             ));
-        } else if lower.contains("sys")
-            || lower.contains("stat")
-            || lower.contains("cpu")
-            || lower.contains("mem")
-            || lower.contains("diag")
-        {
-            self.card_manager.clear();
+            return;
+        }
 
-            let card_sys = Card {
-                id: 1,
-                title: "Kernel Diagnostics".to_string(),
-                body: "PMM: 1989 MiB usable. Heap: 32 MiB. VMM 4 GiB identity mapped. Ring 3 syscalls active.".to_string(),
-                card_type: CardType::Metric,
-                max_age: 600,
-                app_id: Some("kernel".to_string()),
-                kind: Some("monitor".to_string()),
-                pos_x: Some(180),
-                pos_y: Some(180),
-                custom_width: Some(360),
-                custom_height: Some(220),
-                detail_rows: vec![
-                    crate::cards::CardDetailRow::new("cpu", "CPU Usage", "12.4%"),
-                    crate::cards::CardDetailRow::new("mem", "Memory Allocated", "9.1 / 16.0 GB"),
-                ],
-                ..Default::default()
-            };
-
-            let card_sched = Card {
-                id: 2,
-                title: "Task Scheduler".to_string(),
-                body: "PID 1 (init/hello) running. IPC zero-copy ring buffer latency <1.2 us.".to_string(),
-                card_type: CardType::Info,
-                max_age: 600,
-                app_id: Some("sched".to_string()),
-                pos_x: Some(580),
-                pos_y: Some(180),
-                custom_width: Some(360),
-                custom_height: Some(220),
-                ..Default::default()
-            };
-
-            self.card_manager.add_card(card_sys);
-            self.card_manager.add_card(card_sched);
-
-            self.avatar.set_target_position(480.0, 480.0);
-            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
-            self.avatar.set_speech(Some(
-                "System telemetry online.\nKernel running smooth at 60 FPS.\nAll diagnostics nominal.",
-            ));
-        } else if lower.contains("research")
-            || lower.contains("search")
-            || lower.contains("web")
-            || lower.contains("paper")
-        {
-            self.card_manager.clear();
-
-            let card_research = Card {
-                id: 1,
-                title: "Autonomous Web Research".to_string(),
-                body: "Analyzed microkernel IPC vs capability rights. Discovered zero-copy ring buffer reduces context switch overhead by 34%.".to_string(),
-                card_type: CardType::Info,
-                max_age: 600,
-                app_id: Some("research".to_string()),
-                pos_x: Some(360),
-                pos_y: Some(170),
-                custom_width: Some(440),
-                custom_height: Some(240),
-                actions: vec![
-                    crate::cards::CardAction::new("Inspect Notes", "inspect"),
-                    crate::cards::CardAction::new("Save to Memory", "save"),
-                ],
-                ..Default::default()
-            };
-
-            self.card_manager.add_card(card_research);
-            self.avatar.set_target_position(580.0, 480.0);
-            self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
-            self.avatar.set_speech(Some(
-                "Synthesized 4 research papers.\nWork-stealing scheduler architecture\nready for inspection.",
-            ));
-        } else if lower.contains("help") || lower.contains("command") || lower.contains("what can") {
+        // 8. Help
+        if lower.contains("help") || lower.contains("command") || lower.contains("what can") {
             self.card_manager.clear();
             let card_help = Card {
                 id: 1,
@@ -323,12 +305,12 @@ impl ShellApp {
                 custom_width: Some(480),
                 custom_height: Some(250),
                 detail_rows: vec![
-                    crate::cards::CardDetailRow::new("pin", "Interactive Stopwatch", "'stopwatch' or 'timer'"),
-                    crate::cards::CardDetailRow::new("pin", "Scratchpad Notes", "'notes' or 'todo'"),
-                    crate::cards::CardDetailRow::new("cpu", "System Calculator", "'calc' or 'math'"),
-                    crate::cards::CardDetailRow::new("calendar", "Travel Booking", "'book hotel in kyoto'"),
-                    crate::cards::CardDetailRow::new("cpu", "Kernel Diagnostics", "'system stats' or 'cpu'"),
-                    crate::cards::CardDetailRow::new("pin", "Research Agent", "'research papers'"),
+                    crate::cards::CardDetailRow::new("cpu", "Real Host Telemetry", "'stats', 'cpu', 'mem'"),
+                    crate::cards::CardDetailRow::new("pin", "Filesystem Explorer", "'files', 'ls', 'dir'"),
+                    crate::cards::CardDetailRow::new("cpu", "Math Evaluator", "'calc 450 * 12' or '15% of 85'"),
+                    crate::cards::CardDetailRow::new("pin", "Interactive Notes", "'todo buy milk' or 'notes'"),
+                    crate::cards::CardDetailRow::new("clock", "Interactive Stopwatch", "'stopwatch' or 'timer'"),
+                    crate::cards::CardDetailRow::new("wave", "Music Visualizer", "'music' or 'lofi'"),
                     crate::cards::CardDetailRow::new("bed", "Visual Themes", "'theme' (toggle light/dark)"),
                 ],
                 actions: vec![
@@ -340,16 +322,24 @@ impl ShellApp {
             self.avatar.set_target_position(580.0, 480.0);
             self.avatar.set_emotion(crate::avatar::Emotion::Speaking);
             self.avatar.set_speech(Some(
-                "Here are actions you can take!\nType in the dock or press Enter\nto dispatch autonomous agents.",
+                "Here are real OS actions you can take!\nType in the dock to evaluate math, check files,\nor query local Ollama.",
             ));
-        } else if lower.contains("clear") || lower.contains("clean") || lower.contains("reset") {
+            return;
+        }
+
+        // 9. Clear
+        if lower.contains("clear") || lower.contains("clean") || lower.contains("reset") {
             self.card_manager.clear();
             self.avatar.clear_anchor();
             self.avatar.set_emotion(crate::avatar::Emotion::Happy);
             self.avatar.set_speech(Some(
                 "Canvas cleared!\nWhat would you like to explore next?",
             ));
-        } else if lower.contains("theme") || lower.contains("dark") || lower.contains("light") {
+            return;
+        }
+
+        // 10. Theme
+        if lower.contains("theme") || lower.contains("dark") || lower.contains("light") {
             if let Some(renderer) = &mut self.renderer {
                 renderer.theme_mode = match renderer.theme_mode {
                     ThemeMode::Light => ThemeMode::Dark,
@@ -360,13 +350,14 @@ impl ShellApp {
             self.avatar.set_speech(Some(
                 "Switched color theme palette.\nHow does this feel?",
             ));
-        } else {
-            // Live asynchronous Ollama LLM execution!
-            self.avatar.set_speech(Some("Thinking… generating response with local AI."));
-            self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
-            self.is_generating = true;
-            self.llm.submit(&trimmed);
+            return;
         }
+
+        // 11. Live Asynchronous Ollama LLM Execution for any other request!
+        self.avatar.set_speech(Some("Analyzing request… generating intelligent response."));
+        self.avatar.set_emotion(crate::avatar::Emotion::Thinking);
+        self.is_generating = true;
+        self.llm.submit(&trimmed);
     }
 }
 
@@ -484,8 +475,31 @@ impl ApplicationHandler for ShellApp {
                                     }
                                 } else if card.kind.as_deref() == Some("notes") {
                                     if idx == 0 {
-                                        let count = card.detail_rows.len() + 1;
-                                        card.detail_rows.push(crate::cards::CardDetailRow::new("check", &format!("Task item #{}", count), "Active"));
+                                        let count = self.user_notes.len() + 1;
+                                        self.user_notes.push((format!("Task #{}", count), false));
+                                        *card = Card::new_dynamic_notes("System Scratchpad", &self.user_notes);
+                                    } else if idx == 1 {
+                                        self.user_notes.retain(|(_, done)| !*done);
+                                        *card = Card::new_dynamic_notes("System Scratchpad", &self.user_notes);
+                                    }
+                                } else if card.kind.as_deref() == Some("telemetry") {
+                                    if idx == 0 {
+                                        *card = Card::new_real_system(&mut self.sys);
+                                    } else if idx == 1 {
+                                        self.card_manager.dismiss_card(card_id);
+                                    }
+                                } else if card.kind.as_deref() == Some("files") {
+                                    if idx == 0 {
+                                        *card = Card::new_file_browser(".");
+                                    } else if idx == 1 {
+                                        self.card_manager.dismiss_card(card_id);
+                                    }
+                                } else if card.kind.as_deref() == Some("synthesis") {
+                                    if idx == 0 {
+                                        self.user_notes.push((card.body.clone(), false));
+                                        self.avatar.set_speech(Some("Saved response to Scratchpad notes!"));
+                                    } else if idx == 1 {
+                                        self.card_manager.dismiss_card(card_id);
                                     }
                                 } else if card.kind.as_deref() == Some("music") {
                                     if idx == 1 && card.actions.len() > 1 {
@@ -654,20 +668,8 @@ impl ApplicationHandler for ShellApp {
                             self.avatar.set_emotion(crate::avatar::Emotion::Happy);
                         }
                         _ => {
-                            // Display complete LLM answer in an AI response card
-                            let card = Card {
-                                id: 0,
-                                title: format!("AI: {}", response.model),
-                                body: clean_text,
-                                card_type: CardType::Info,
-                                max_age: 1800,
-                                app_id: Some("ollama".to_string()),
-                                pos_x: Some(300),
-                                pos_y: Some(170),
-                                custom_width: Some(520),
-                                custom_height: Some(260),
-                                ..Default::default()
-                            };
+                            // Display complete LLM answer in a styled AI response card
+                            let card = Card::new_llm_response(&response.prompt, &clean_text, &response.model);
                             self.card_manager.add_card(card);
                         }
                     }

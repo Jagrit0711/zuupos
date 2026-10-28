@@ -430,6 +430,72 @@ fn main() {
         }
         save_png(&music_renderer, &out_dir.join("music_app_spawned.png"));
     }
+
+    // ── 9. Real Host Hardware Telemetry Card ─────────────────────────────────
+    {
+        let mut sys = sysinfo::System::new_all();
+        let sys_card = Card::new_real_system(&mut sys);
+        let sys_cards = vec![&sys_card];
+        let mut sys_renderer = Renderer::new_headless(fw, fh);
+        sys_renderer.theme_mode = ThemeMode::Light;
+        let mut sys_avatar = Avatar::new();
+        sys_avatar.set_position(740.0, 480.0);
+        sys_avatar.set_emotion(Emotion::Speaking);
+        sys_avatar.set_speech(Some(
+            "Host hardware telemetry online.\nReal CPU load, memory, & processes.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            sys_avatar.tick(tick, fw, fh);
+            sys_renderer.render(tick, &sys_cards, &sys_avatar, false);
+        }
+        save_png(&sys_renderer, &out_dir.join("real_telemetry_spawned.png"));
+    }
+
+    // ── 10. Real Workspace File Explorer Card ────────────────────────────────
+    {
+        let files_card = Card::new_file_browser(".");
+        let files_cards = vec![&files_card];
+        let mut files_renderer = Renderer::new_headless(fw, fh);
+        files_renderer.theme_mode = ThemeMode::Light;
+        let mut files_avatar = Avatar::new();
+        files_avatar.set_position(740.0, 480.0);
+        files_avatar.set_emotion(Emotion::Happy);
+        files_avatar.set_speech(Some(
+            "Workspace explorer online.\nListed actual local filesystem contents.",
+        ));
+        let mut tick = 0u64;
+        for _ in 0..30 {
+            tick += 1;
+            files_avatar.tick(tick, fw, fh);
+            files_renderer.render(tick, &files_cards, &files_avatar, false);
+        }
+        save_png(&files_renderer, &out_dir.join("file_explorer_spawned.png"));
+    }
+
+    // ── 11. Real Dynamic Math Evaluator Card ─────────────────────────────────
+    {
+        if let Some((expr, dec, hex)) = Card::evaluate_math("450 * 12 + 250") {
+            let math_card = Card::new_calculator(&expr, &dec, &hex);
+            let math_cards = vec![&math_card];
+            let mut math_renderer = Renderer::new_headless(fw, fh);
+            math_renderer.theme_mode = ThemeMode::Light;
+            let mut math_avatar = Avatar::new();
+            math_avatar.set_position(720.0, 480.0);
+            math_avatar.set_emotion(Emotion::Happy);
+            math_avatar.set_speech(Some(
+                "Calculated 450 * 12 + 250 = 5,650.\nHex: 0x1612.",
+            ));
+            let mut tick = 0u64;
+            for _ in 0..30 {
+                tick += 1;
+                math_avatar.tick(tick, fw, fh);
+                math_renderer.render(tick, &math_cards, &math_avatar, false);
+            }
+            save_png(&math_renderer, &out_dir.join("real_math_eval_spawned.png"));
+        }
+    }
 }
 
 
